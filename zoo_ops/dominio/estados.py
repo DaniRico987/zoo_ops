@@ -10,7 +10,7 @@ Las funciones `validar_transicion_*_extra` son validadores de reglas de negocio:
 devuelven un mensaje de error o `None`, y no mutan nada.
 """
 
-from typing import Dict, FrozenSet, Optional
+from typing import Dict, FrozenSet, List, Optional, Tuple, Union
 from zoo_ops.dominio.enums import (
     EstadoCuidador, EstadoAnimal, EstadoVehiculo, EstadoTarea, EstadoIncidente,
     Medio, TipoIncidente,
@@ -183,7 +183,7 @@ def _cuidador_tiene_tarea_activa(
     """Indica si el cuidador ya tiene una tarea en estado activo."""
     estados_activos = {EstadoTarea.ASIGNADA, EstadoTarea.EN_CURSO, EstadoTarea.PAUSADA}
     for tarea in mundo.tareas.values():
-        if tarea.cuidador_asignado != cuidador_id:
+        if cuidador_id not in tarea.cuidadores_asignados:
             continue
         if tarea.estado not in estados_activos:
             continue
@@ -243,32 +243,48 @@ def validar_transicion_tarea_extra(
     estado_actual: EstadoTarea,
     estado_nuevo: EstadoTarea,
     mundo: Mundo,
-    cuidador_id: Optional[str] = None,
+    cuidadores_ids: Optional[Union[List[str], Tuple[str, ...]]] = None,
 ) -> Optional[str]:
     """
     Valida reglas extra para transiciones de Tarea.
     Las dependencias y la asignación se calculan desde el mundo.
 
-    INV-3: transición a ASIGNADA exige `cuidador_id` existente y sin otra tarea
-    activa.
+    INV-3: cada cuidador asignado debe existir, estar DISPONIBLE y no tener otra
+    tarea activa. La cantidad debe satisfacer `personas_minimas`.
     """
     tarea = mundo.tareas.get(tarea_id)
     if tarea is None:
         return f"Tarea {tarea_id} no existe en el mundo"
 
     if estado_nuevo == EstadoTarea.ASIGNADA:
-        if not cuidador_id:
-            return f"Transición a ASIGNADA requiere cuidador_id (tarea {tarea_id})"
-        cuidador = mundo.cuidadores.get(cuidador_id)
-        if cuidador is None:
-            return f"Cuidador {cuidador_id} no existe"
-        if cuidador.estado != EstadoCuidador.DISPONIBLE:
+        if not isinstance(cuidadores_ids, (list, tuple)) or not cuidadores_ids:
             return (
-                f"Cuidador {cuidador_id} no está DISPONIBLE "
-                f"(estado: {cuidador.estado.name})"
+                f"Transición a ASIGNADA requiere una lista o tupla no vacía "
+                f"de cuidadores_ids (tarea {tarea_id})"
             )
-        if _cuidador_tiene_tarea_activa(mundo, cuidador_id, excluir_tarea_id=tarea_id):
-            return f"Cuidador {cuidador_id} ya tiene una tarea activa (INV-3)"
+        if any(not isinstance(cuidador_id, str) or not cuidador_id
+               for cuidador_id in cuidadores_ids):
+            return "Cada valor de cuidadores_ids debe ser un ID no vacío"
+        if len(cuidadores_ids) != len(set(cuidadores_ids)):
+            return "cuidadores_ids no puede contener duplicados"
+        if len(cuidadores_ids) < tarea.personas_minimas:
+            return (
+                f"Tarea {tarea_id} requiere al menos {tarea.personas_minimas} "
+                f"personas; se recibieron {len(cuidadores_ids)}"
+            )
+        for cuidador_id in cuidadores_ids:
+            cuidador = mundo.cuidadores.get(cuidador_id)
+            if cuidador is None:
+                return f"Cuidador {cuidador_id} no existe"
+            if cuidador.estado != EstadoCuidador.DISPONIBLE:
+                return (
+                    f"Cuidador {cuidador_id} no está DISPONIBLE "
+                    f"(estado: {cuidador.estado.name})"
+                )
+            if _cuidador_tiene_tarea_activa(
+                mundo, cuidador_id, excluir_tarea_id=tarea_id
+            ):
+                return f"Cuidador {cuidador_id} ya tiene una tarea activa (INV-3)"
 
     # Regla: No puede pasar a EN_CURSO ni COMPLETADA si tiene dependencias pendientes
     if estado_nuevo in {EstadoTarea.EN_CURSO, EstadoTarea.COMPLETADA}:
@@ -356,7 +372,7 @@ def validar_transicion_incidente_extra(
 # Parámetros obligatorios para ciertas transiciones.
 _PARAMETROS_REQUERIDOS = {
     ("Animal", EstadoAnimal.EN_RECINTO): ("recinto_destino",),
-    ("Tarea", EstadoTarea.ASIGNADA): ("cuidador_id",),
+    ("Tarea", EstadoTarea.ASIGNADA): ("cuidadores_ids",),
 }
 
 
@@ -394,7 +410,7 @@ def ejecutar_transicion(
         causa: Texto explicativo
         **parametros: Parámetros adicionales según entidad_tipo:
             - Animal: recinto_destino (obligatorio para EN_RECINTO)
-            - Tarea: cuidador_id (obligatorio para ASIGNADA)
+            - Tarea: cuidadores_ids (lista o tupla no vacía para ASIGNADA)
             - Incidente: sin parámetros; el cierre se calcula desde el mundo
 
     Returns:
@@ -568,7 +584,7 @@ def _construir_args_validacion(
             estado_actual,
             estado_nuevo,
             mundo,
-            parametros.get("cuidador_id"),
+            parametros.get("cuidadores_ids"),
         )
     if entidad_tipo == "Incidente":
         return (
@@ -590,7 +606,7 @@ def _datos_extra_animal(entidad, estado_nuevo, parametros: dict) -> dict:
 def _datos_extra_tarea(entidad, estado_nuevo, parametros: dict) -> dict:
     """Datos que el evento debe escribir en la Tarea."""
     if estado_nuevo == EstadoTarea.ASIGNADA:
-        return {"cuidador_asignado": parametros["cuidador_id"]}
+        return {"cuidadores_ids": tuple(parametros["cuidadores_ids"])}
     if estado_nuevo == EstadoTarea.PENDIENTE:
-        return {"cuidador_asignado": None}
+        return {"cuidadores_ids": ()}
     return {}

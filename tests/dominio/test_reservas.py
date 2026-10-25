@@ -9,10 +9,12 @@ from zoo_ops.dominio.reservas import (
     crear_reservas_para_tarea, validar_recursos_para_tarea, _orden_determinista_recursos,
     reservar_para_tarea
 )
-from zoo_ops.dominio.entidades import Cuidador, Vehiculo, Equipo, Tarea, HabilidadRequerida
+from zoo_ops.dominio.entidades import (
+    Cuidador, Vehiculo, Equipo, Tarea, HabilidadRequerida, Mundo,
+)
 from zoo_ops.dominio.enums import (
-    EstadoCuidador, EstadoVehiculo, TipoVehiculo, TipoEquipo, Habilidad,
-    Certificacion, PrioridadTarea
+    EstadoCuidador, EstadoEquipo, EstadoVehiculo, TipoVehiculo, TipoEquipo,
+    Habilidad, Certificacion, PrioridadTarea
 )
 from zoo_ops.dominio.errores import (
     RecursosInvalidos, ReservaAtomicaFallida, ReservaInvalida,
@@ -349,13 +351,8 @@ class TestValidarRecursosParaTarea:
             certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE})
         )
         
-        # Mock mundo simple
-        class MundoMock:
-            cuidadores = {"c1": cuidador}
-            vehiculos = {}
-            equipos = {}
-        
-        errores = validar_recursos_para_tarea(tarea, MundoMock(), cuidador_id="c1")
+        mundo = Mundo(cuidadores={"c1": cuidador})
+        errores = validar_recursos_para_tarea(tarea, mundo, cuidador_id="c1")
         
         assert len(errores) == 1
         assert "nivel 3 < 4" in errores[0]
@@ -373,12 +370,8 @@ class TestValidarRecursosParaTarea:
             certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE})
         )
         
-        class MundoMock:
-            cuidadores = {"c1": cuidador}
-            vehiculos = {}
-            equipos = {}
-        
-        errores = validar_recursos_para_tarea(tarea, MundoMock(), cuidador_id="c1")
+        mundo = Mundo(cuidadores={"c1": cuidador})
+        errores = validar_recursos_para_tarea(tarea, mundo, cuidador_id="c1")
         
         assert any("TRANQUILIZANTE" in e for e in errores)
     
@@ -392,14 +385,28 @@ class TestValidarRecursosParaTarea:
         
         tarea = Tarea(id="t1", tipo="captura")
         
-        class MundoMock:
-            cuidadores = {"c1": cuidador}
-            vehiculos = {}
-            equipos = {}
-        
-        errores = validar_recursos_para_tarea(tarea, MundoMock(), cuidador_id="c1")
-        
+        mundo = Mundo(cuidadores={"c1": cuidador})
+        errores = validar_recursos_para_tarea(tarea, mundo, cuidador_id="c1")
         assert any("no está disponible" in e for e in errores)
+
+    def test_validar_cuidador_en_estado_asignado_no_esta_disponible(self):
+        cuidador = Cuidador(
+            id="c1", nombre="Test", estado=EstadoCuidador.ASIGNADO,
+        )
+        mundo = Mundo(cuidadores={"c1": cuidador})
+
+        errores = validar_recursos_para_tarea(
+            Tarea(id="t1", tipo="captura"), mundo, cuidador_id="c1",
+        )
+
+        assert any("no está disponible" in error for error in errores)
+
+    def test_validar_recursos_rechaza_diccionarios_en_lugar_de_mundo(self):
+        with pytest.raises(TypeError, match="Mundo"):
+            validar_recursos_para_tarea(
+                Tarea(id="t1", tipo="captura"),
+                {"cuidadores": {}, "vehiculos": {}, "equipos": {}},
+            )
     
     def test_validar_vehiculo_certificacion_cuidador(self):
         cuidador = Cuidador(
@@ -417,13 +424,9 @@ class TestValidarRecursosParaTarea:
         
         tarea = Tarea(id="t1", tipo="traslado")
         
-        class MundoMock:
-            cuidadores = {"c1": cuidador}
-            vehiculos = {"v1": vehiculo}
-            equipos = {}
-        
+        mundo = Mundo(cuidadores={"c1": cuidador}, vehiculos={"v1": vehiculo})
         errores = validar_recursos_para_tarea(
-            tarea, MundoMock(), cuidador_id="c1", vehiculo_id="v1"
+            tarea, mundo, cuidador_id="c1", vehiculo_id="v1"
         )
         
         assert any("CAMION_TRASLADO" in e for e in errores)
@@ -431,17 +434,13 @@ class TestValidarRecursosParaTarea:
     def test_validar_equipo_no_disponible(self):
         equipo = Equipo(
             id="e1", tipo=TipoEquipo.DARDOS_TRANQUILIZANTES,
-            ubicacion="bodega", estado="en_uso"  # no disponible
+            ubicacion="bodega", estado=EstadoEquipo.EN_USO  # no disponible
         )
         
         tarea = Tarea(id="t1", tipo="captura", recursos_requeridos=("e1",))
         
-        class MundoMock:
-            cuidadores = {}
-            vehiculos = {}
-            equipos = {"e1": equipo}
-        
-        errores = validar_recursos_para_tarea(tarea, MundoMock(), equipo_ids=["e1"])
+        mundo = Mundo(equipos={"e1": equipo})
+        errores = validar_recursos_para_tarea(tarea, mundo, equipo_ids=["e1"])
         
         assert any("no está disponible" in e for e in errores)
 
@@ -518,20 +517,20 @@ class TestReservarParaTarea:
         
         equipo = Equipo(
             id="e1", tipo=TipoEquipo.DARDOS_TRANQUILIZANTES,
-            ubicacion="bodega", estado="disponible"
+            ubicacion="bodega", estado=EstadoEquipo.DISPONIBLE
         )
-        
-        class MundoMock:
-            cuidadores = {"c1": cuidador}
-            vehiculos = {"v1": vehiculo}
-            equipos = {"e1": equipo}
+        mundo = Mundo(
+            cuidadores={"c1": cuidador},
+            vehiculos={"v1": vehiculo},
+            equipos={"e1": equipo},
+        )
         
         paquete = crear_reservas_para_tarea(
             tarea, cuidador_id="c1", vehiculo_id="v1", equipo_ids=["e1"],
             desde=100, hasta=200
         )
         reservas = reservar_para_tarea(
-            MundoMock(), self.registro, tarea, paquete
+            mundo, self.registro, tarea, paquete
         )
         
         assert len(reservas) == 3
@@ -551,16 +550,11 @@ class TestReservarParaTarea:
         
         equipo = Equipo(
             id="e1", tipo=TipoEquipo.DARDOS_TRANQUILIZANTES,
-            ubicacion="bodega", estado="disponible"
+            ubicacion="bodega", estado=EstadoEquipo.DISPONIBLE
         )
-        
-        class MundoMock:
-            cuidadores = {}
-            vehiculos = {}
-            equipos = {"e1": equipo}
-        
+        mundo = Mundo(equipos={"e1": equipo})
         with pytest.raises(ReservaAtomicaFallida, match="intra-paquete"):
-            reservar_para_tarea(MundoMock(), self.registro, tarea, paquete)
+            reservar_para_tarea(mundo, self.registro, tarea, paquete)
         
         assert self.registro.verificar_disponibilidad(TipoRecurso.EQUIPO, "e1", 100, 200) is True
         assert self.registro.verificar_disponibilidad(TipoRecurso.EQUIPO, "e1", 150, 250) is True
@@ -579,16 +573,12 @@ class TestReservarParaTarea:
             certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE})
         )
         
-        class MundoMock:
-            cuidadores = {"c1": cuidador}
-            vehiculos = {}
-            equipos = {}
-        
+        mundo = Mundo(cuidadores={"c1": cuidador})
         paquete = crear_reservas_para_tarea(
             tarea, cuidador_id="c1", desde=100, hasta=200
         )
         with pytest.raises(RecursosInvalidos) as exc:
-            reservar_para_tarea(MundoMock(), self.registro, tarea, paquete)
+            reservar_para_tarea(mundo, self.registro, tarea, paquete)
         
         assert "nivel 3 < 4" in str(exc.value)
         # No debe haber reservas creadas
@@ -599,13 +589,8 @@ class TestReservarParaTarea:
             id="t1", tipo="test", recursos_requeridos=("v1",),
         )
 
-        class MundoVacio:
-            cuidadores = {}
-            vehiculos = {}
-            equipos = {}
-
         with pytest.raises(RecursosInvalidos, match="vacío"):
-            reservar_para_tarea(MundoVacio(), self.registro, tarea, [])
+            reservar_para_tarea(Mundo(), self.registro, tarea, [])
 
         assert self.registro.obtener_reservas_de_tarea("t1") == []
 
@@ -615,25 +600,15 @@ class TestReservarParaTarea:
             certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE}),
         )
 
-        class MundoVacio:
-            cuidadores = {}
-            vehiculos = {}
-            equipos = {}
-
         with pytest.raises(RecursosInvalidos, match="vacío"):
-            reservar_para_tarea(MundoVacio(), self.registro, tarea, [])
+            reservar_para_tarea(Mundo(), self.registro, tarea, [])
 
         assert self.registro.obtener_reservas_de_tarea("t1") == []
 
     def test_reservar_para_tarea_paquete_vacio_sin_requisitos_es_noop(self):
         tarea = Tarea(id="t1", tipo="alimentacion")
 
-        class MundoVacio:
-            cuidadores = {}
-            vehiculos = {}
-            equipos = {}
-
-        resultado = reservar_para_tarea(MundoVacio(), self.registro, tarea, [])
+        resultado = reservar_para_tarea(Mundo(), self.registro, tarea, [])
 
         assert resultado == []
         assert self.registro.obtener_reservas_de_tarea("t1") == []
@@ -642,13 +617,8 @@ class TestReservarParaTarea:
         tarea = Tarea(id="t1", tipo="test")
         paquete = [Reserva(TipoRecurso.CUIDADOR, "c1", "t2", 100, 200)]
         
-        class MundoVacio:
-            cuidadores = {}
-            vehiculos = {}
-            equipos = {}
-        
         with pytest.raises(RecursosInvalidos, match="no pertenece"):
-            reservar_para_tarea(MundoVacio(), self.registro, tarea, paquete)
+            reservar_para_tarea(Mundo(), self.registro, tarea, paquete)
         
         assert self.registro.verificar_disponibilidad(TipoRecurso.CUIDADOR, "c1", 100, 200) is True
     
@@ -659,10 +629,5 @@ class TestReservarParaTarea:
             Reserva(TipoRecurso.CUIDADOR, "c2", "t1", 100, 200),
         ]
         
-        class MundoVacio:
-            cuidadores = {}
-            vehiculos = {}
-            equipos = {}
-        
         with pytest.raises(RecursosInvalidos, match="un solo cuidador"):
-            reservar_para_tarea(MundoVacio(), self.registro, tarea, paquete)
+            reservar_para_tarea(Mundo(), self.registro, tarea, paquete)

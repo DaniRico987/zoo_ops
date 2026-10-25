@@ -9,10 +9,12 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 from zoo_ops.dominio.enums import (
     TipoNodo, TipoRecinto, Medio, Peligrosidad, TipoVehiculo, TipoEquipo,
     Habilidad, Certificacion, EstadoCuidador, EstadoAnimal, EstadoVehiculo,
+    EstadoEquipo,
     EstadoTarea, EstadoIncidente, TipoIncidente, TipoSensor, MedioPermitido,
     PrioridadTarea
 )
 from zoo_ops.dominio.catalogos import Especie
+from zoo_ops.dominio.errores import ErrorDominio
 
 
 # ============================================================================
@@ -123,7 +125,7 @@ class Equipo:
     id: str
     tipo: TipoEquipo
     ubicacion: str  # nodo_id donde está guardado
-    estado: str = "disponible"  # disponible, en_uso, mantenimiento
+    estado: EstadoEquipo = EstadoEquipo.DISPONIBLE
 
 
 # ============================================================================
@@ -154,7 +156,13 @@ class Tarea:
     interrumpible: bool = True
     estado: EstadoTarea = EstadoTarea.PENDIENTE
     incidente_origen: Optional[str] = None  # id del incidente que la generó
-    cuidador_asignado: Optional[str] = None
+    cuidadores_asignados: Tuple[str, ...] = field(default_factory=tuple)
+    personas_minimas: int = 1
+
+    def __post_init__(self) -> None:
+        """Exige que la tarea requiera al menos una persona."""
+        if self.personas_minimas < 1:
+            raise ErrorDominio("personas_minimas debe ser al menos 1")
 
 
 # ============================================================================

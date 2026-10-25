@@ -155,7 +155,7 @@ def test_transiciones_tarea_validas_nunca_fallan(data):
         return
 
     nuevo = data.draw(st.sampled_from(sorted(destinos, key=lambda e: e.name)))
-    parametros = {"cuidador_id": "c1"} if nuevo == EstadoTarea.ASIGNADA else {}
+    parametros = {"cuidadores_ids": ("c1",)} if nuevo == EstadoTarea.ASIGNADA else {}
 
     ejecutar_transicion(
         mundo, registro, "Tarea", "t1", nuevo, 10, "test", **parametros,
@@ -378,7 +378,7 @@ class ReconstruccionHonestaMachine(RuleBasedStateMachine):
                     return
                 nuevo = _elegir_destino(destinos, self.paso)
         parametros = (
-            {"cuidador_id": "c1"} if nuevo == EstadoTarea.ASIGNADA else {}
+            {"cuidadores_ids": ("c1",)} if nuevo == EstadoTarea.ASIGNADA else {}
         )
         ejecutar_transicion(
             self.mundo_vivo, self.registro, "Tarea", "t1",
@@ -541,7 +541,7 @@ def test_secuencia_tarea_con_reserva_y_asignacion(data):
         nuevo = data.draw(st.sampled_from(sorted(destinos, key=lambda e: e.name)))
         tiempo += 10
         parametros = (
-            {"cuidador_id": "c1"} if nuevo == EstadoTarea.ASIGNADA else {}
+            {"cuidadores_ids": ("c1",)} if nuevo == EstadoTarea.ASIGNADA else {}
         )
         ejecutar_transicion(
             mundo, registro, "Tarea", "t1", nuevo, tiempo, "secuencia",
@@ -563,14 +563,17 @@ def test_secuencia_tarea_con_reserva_y_asignacion(data):
 
 def test_inv3_cuidador_con_tarea_activa():
     c1 = Cuidador(id="c1", nombre="C", estado=EstadoCuidador.DISPONIBLE)
-    t1 = Tarea(id="t1", tipo="test", estado=EstadoTarea.EN_CURSO, cuidador_asignado="c1")
+    t1 = Tarea(
+        id="t1", tipo="test", estado=EstadoTarea.EN_CURSO,
+        cuidadores_asignados=("c1",),
+    )
     t2 = Tarea(id="t2", tipo="test")
     mundo = Mundo(cuidadores={"c1": c1}, tareas={"t1": t1, "t2": t2})
 
     with pytest.raises(TransicionInvalida, match="INV-3"):
         ejecutar_transicion(
             mundo, RegistroEventos(), "Tarea", "t2",
-            EstadoTarea.ASIGNADA, 10, "asignar", cuidador_id="c1",
+            EstadoTarea.ASIGNADA, 10, "asignar", cuidadores_ids=("c1",),
         )
 
     assert mundo.tareas["t2"].estado == EstadoTarea.PENDIENTE
@@ -598,7 +601,7 @@ def test_dependencias_calculadas_por_dominio():
     t1 = Tarea(id="t1", tipo="test", estado=EstadoTarea.COMPLETADA)
     t2 = Tarea(
         id="t2", tipo="test", estado=EstadoTarea.ASIGNADA,
-        cuidador_asignado="c1", dependencias=frozenset({"t1"}),
+        cuidadores_asignados=("c1",), dependencias=frozenset({"t1"}),
     )
     mundo = Mundo(tareas={"t1": t1, "t2": t2})
 
@@ -613,7 +616,7 @@ def test_dependencias_calculadas_por_dominio():
 def test_dependencia_inexistente_lanza_error():
     t2 = Tarea(
         id="t2", tipo="test", estado=EstadoTarea.ASIGNADA,
-        cuidador_asignado="c1", dependencias=frozenset({"t_no_existe"}),
+        cuidadores_asignados=("c1",), dependencias=frozenset({"t_no_existe"}),
     )
     mundo = Mundo(tareas={"t2": t2})
 
@@ -655,15 +658,15 @@ def test_estado_no_enum_en_ejecutar_transicion():
 
 
 # ============================================================================
-# Test estático: no mutar estado/cuidador_asignado con replace(...)
+# Test estático: no mutar estado/cuidadores_asignados con replace(...)
 # ============================================================================
 
 # Campos que solo `eventos.py` puede escribir con dataclasses.replace.
-_CAMPOS_PROTEGIDOS_REPLACE = {"estado", "cuidador_asignado"}
+_CAMPOS_PROTEGIDOS_REPLACE = {"estado", "cuidadores_asignados"}
 
 
 class _ReplaceEstadoVisitor(ast.NodeVisitor):
-    """Busca llamadas a replace(..., estado=.../cuidador_asignado=...)."""
+    """Busca replace(...) que escriban estado o cuidadores_asignados."""
 
     def __init__(self, filepath):
         self.filepath = filepath

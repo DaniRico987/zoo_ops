@@ -71,7 +71,7 @@ Implementar 9 cambios estructurales al dominio de zoo_ops tras la revisión:
 - [ ] Task 8.2: Cambiar `reconstruir_estado` para lanzar EventoNoSoportado en tipos sin aplicador
 - [ ] Task 8.2: Hacer no-op explícitos para CREACION_ENTIDAD, RESERVA_CREADA, RESERVA_LIBERADA
 - [ ] Task 8.4: Asegurar que reconstruir_estado no modifica mundo recibido (deepcopy inicial)
-- [ ] Task 8.5: Documentar en informe qué cambios NO generan evento (ubicación, fatiga, cuidador_asignado, etc.)
+- [ ] Task 8.5: Documentar en informe qué cambios NO generan evento (ubicación, fatiga, cuidadores_asignados, etc.)
 
 ### Phase 9: Pruebas honestas
 - [ ] Task 9.1: Refactor test_hypothesis.py: mundo vivo solo via aplicar_transicion_*

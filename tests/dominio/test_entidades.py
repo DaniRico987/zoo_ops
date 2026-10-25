@@ -12,9 +12,11 @@ from zoo_ops.dominio.entidades import (
 from zoo_ops.dominio.enums import (
     TipoNodo, TipoRecinto, Medio, MedioPermitido, TipoVehiculo, TipoEquipo,
     Habilidad, Certificacion, EstadoCuidador, EstadoAnimal, EstadoVehiculo,
-    EstadoTarea, EstadoIncidente, TipoIncidente, TipoSensor, PrioridadTarea
+    EstadoEquipo, EstadoTarea, EstadoIncidente, TipoIncidente, TipoSensor,
+    PrioridadTarea
 )
 from zoo_ops.dominio.catalogos import ESPECIES_CATALOGO
+from zoo_ops.dominio.errores import ErrorDominio
 
 
 class TestNodo:
@@ -151,12 +153,12 @@ class TestEquipo:
     def test_crear_equipo(self):
         e = Equipo(
             id="e1", tipo=TipoEquipo.DARDOS_TRANQUILIZANTES,
-            ubicacion="bodega1", estado="disponible"
+            ubicacion="bodega1", estado=EstadoEquipo.DISPONIBLE
         )
         assert e.id == "e1"
         assert e.tipo == TipoEquipo.DARDOS_TRANQUILIZANTES
         assert e.ubicacion == "bodega1"
-        assert e.estado == "disponible"
+        assert e.estado == EstadoEquipo.DISPONIBLE
 
 
 class TestTarea:
@@ -175,6 +177,11 @@ class TestTarea:
         assert t.duracion_estimada == 3600
         assert t.estado == EstadoTarea.PENDIENTE
         assert t.interrumpible is True
+        assert t.personas_minimas == 1
+
+    def test_personas_minimas_menor_que_uno_lanza_error_de_dominio(self):
+        with pytest.raises(ErrorDominio, match="personas_minimas"):
+            Tarea(id="t1", tipo="captura", personas_minimas=0)
     
     def test_crear_tarea_con_habilidades(self):
         t = Tarea(

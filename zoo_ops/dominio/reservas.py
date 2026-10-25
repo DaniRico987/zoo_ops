@@ -11,8 +11,8 @@ from enum import Enum, auto
 from zoo_ops.dominio.errores import (
     RecursosInvalidos, ReservaAtomicaFallida, ReservaInvalida,
 )
-from zoo_ops.dominio.entidades import Cuidador, Vehiculo, Equipo, Tarea
-from zoo_ops.dominio.enums import EstadoCuidador, EstadoVehiculo
+from zoo_ops.dominio.entidades import Cuidador, Vehiculo, Equipo, Tarea, Mundo
+from zoo_ops.dominio.enums import EstadoCuidador, EstadoEquipo, EstadoVehiculo
 
 
 # ============================================================================
@@ -404,7 +404,7 @@ def reservar_para_tarea(
 
 def validar_recursos_para_tarea(
     tarea: Tarea,
-    mundo,  # Mundo o dicts de entidades
+    mundo: Mundo,
     cuidador_id: Optional[str] = None,
     vehiculo_id: Optional[str] = None,
     equipo_ids: Optional[List[str]] = None
@@ -413,11 +413,14 @@ def validar_recursos_para_tarea(
     Valida que los recursos propuestos cumplen requisitos de la tarea.
     Retorna lista de errores (vacía si todo OK).
     """
+    if not isinstance(mundo, Mundo):
+        raise TypeError("mundo debe ser una instancia de Mundo")
+
     errores = []
     
     # Validar cuidador
     if cuidador_id:
-        cuidador = mundo.cuidadores.get(cuidador_id) if hasattr(mundo, 'cuidadores') else mundo.get('cuidadores', {}).get(cuidador_id)
+        cuidador = mundo.cuidadores.get(cuidador_id)
         if not cuidador:
             errores.append(f"Cuidador {cuidador_id} no existe")
         else:
@@ -433,18 +436,18 @@ def validar_recursos_para_tarea(
                 if cert not in cuidador.certificaciones:
                     errores.append(f"Cuidador {cuidador_id} falta certificación {cert.name}")
             # Verificar estado
-            if cuidador.estado not in {EstadoCuidador.DISPONIBLE, EstadoCuidador.ASIGNADO}:
+            if cuidador.estado != EstadoCuidador.DISPONIBLE:
                 errores.append(f"Cuidador {cuidador_id} no está disponible (estado: {cuidador.estado.name})")
     
     # Validar vehículo
     if vehiculo_id:
-        vehiculo = mundo.vehiculos.get(vehiculo_id) if hasattr(mundo, 'vehiculos') else mundo.get('vehiculos', {}).get(vehiculo_id)
+        vehiculo = mundo.vehiculos.get(vehiculo_id)
         if not vehiculo:
             errores.append(f"Vehículo {vehiculo_id} no existe")
         else:
             # Verificar certificación del cuidador para este vehículo
             if cuidador_id:
-                cuidador = mundo.cuidadores.get(cuidador_id) if hasattr(mundo, 'cuidadores') else mundo.get('cuidadores', {}).get(cuidador_id)
+                cuidador = mundo.cuidadores.get(cuidador_id)
                 if cuidador and vehiculo.certificacion_requerida not in cuidador.certificaciones:
                     errores.append(
                         f"Cuidador {cuidador_id} no tiene certificación {vehiculo.certificacion_requerida.name} "
@@ -457,10 +460,13 @@ def validar_recursos_para_tarea(
     # Validar equipos
     if equipo_ids:
         for equipo_id in equipo_ids:
-            equipo = mundo.equipos.get(equipo_id) if hasattr(mundo, 'equipos') else mundo.get('equipos', {}).get(equipo_id)
+            equipo = mundo.equipos.get(equipo_id)
             if not equipo:
                 errores.append(f"Equipo {equipo_id} no existe")
-            elif equipo.estado != "disponible":
-                errores.append(f"Equipo {equipo_id} no está disponible (estado: {equipo.estado})")
+            elif equipo.estado != EstadoEquipo.DISPONIBLE:
+                errores.append(
+                    f"Equipo {equipo_id} no está disponible "
+                    f"(estado: {equipo.estado.name})"
+                )
     
     return errores

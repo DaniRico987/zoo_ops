@@ -52,6 +52,13 @@ class TipoEquipo(Enum):
     CONTENEDOR_OXIGENADO = auto()
 
 
+class EstadoEquipo(Enum):
+    """Estados posibles de un equipo reservable."""
+    DISPONIBLE = auto()
+    EN_USO = auto()
+    EN_MANTENIMIENTO = auto()
+
+
 class Habilidad(Enum):
     """Habilidades de los cuidadores."""
     REPARACION = auto()

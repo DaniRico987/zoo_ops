@@ -94,6 +94,24 @@ class TestRegistroEventos:
 
         assert evento_a.id == evento_b.id == 1
 
+    def test_anexar_id_mayor_avanza_el_siguiente_id(self):
+        registro = RegistroEventos()
+        registro.anexar(_evento(TipoEvento.CAMBIO_ESTADO, id=9))
+
+        assert registro.siguiente_id_evento() == 10
+        assert registro.siguiente_id_evento() == 11
+
+    def test_crear_evento_tras_anexar_id_manual_usa_el_siguiente(self):
+        registro = RegistroEventos()
+        registro.anexar(_evento(TipoEvento.CAMBIO_ESTADO, id=5))
+
+        evento = crear_evento(
+            registro, 10, TipoEvento.CAMBIO_ESTADO, "Cuidador", "c1",
+            "A", "B", "test",
+        )
+
+        assert evento.id == 6
+
     def test_anexar_id_duplicado_falla(self):
         registro = RegistroEventos()
         e1 = _evento(TipoEvento.CAMBIO_ESTADO, id=7)
@@ -160,19 +178,19 @@ class TestAplicarEvento:
         mundo = Mundo(
             tareas={"t1": Tarea(
                 id="t1", tipo="test", estado=EstadoTarea.ASIGNADA,
-                cuidador_asignado="c1",
+                cuidadores_asignados=("c1",),
             )}
         )
         evento = _evento(
             TipoEvento.CAMBIO_ESTADO, entidad_tipo="Tarea", entidad_id="t1",
             estado_antes="ASIGNADA", estado_despues="PENDIENTE",
-            datos_extra={"cuidador_asignado": None},
+            datos_extra={"cuidadores_ids": []},
         )
 
         aplicar_evento(mundo, evento)
 
         assert mundo.tareas["t1"].estado == EstadoTarea.PENDIENTE
-        assert mundo.tareas["t1"].cuidador_asignado is None
+        assert mundo.tareas["t1"].cuidadores_asignados == ()
 
     def test_tipo_de_entidad_desconocido(self):
         with pytest.raises(EventoNoSoportado):

@@ -48,42 +48,41 @@ def _verificar_invariante_1_habilidades_cuidador(mundo: Mundo) -> List[Violacion
     
     for tarea in mundo.tareas.values():
         if tarea.estado in {EstadoTarea.ASIGNADA, EstadoTarea.EN_CURSO, EstadoTarea.PAUSADA}:
-            if not tarea.cuidador_asignado:
-                continue
-            
-            cuidador = mundo.cuidadores.get(tarea.cuidador_asignado)
-            if not cuidador:
-                violaciones.append(ViolacionInvariante(
-                    invariante="INV-1-habilidades-certificaciones",
-                    entidad_tipo="Tarea",
-                    entidad_id=tarea.id,
-                    detalle=f"Cuidador asignado {tarea.cuidador_asignado} no existe"
-                ))
-                continue
-            
-            # Verificar habilidades
-            for hab_req in tarea.habilidades_requeridas:
-                nivel = cuidador.habilidades.get(hab_req.habilidad, 0)
-                if nivel < hab_req.nivel_minimo:
+            for cuidador_id in tarea.cuidadores_asignados:
+                cuidador = mundo.cuidadores.get(cuidador_id)
+                if not cuidador:
                     violaciones.append(ViolacionInvariante(
                         invariante="INV-1-habilidades-certificaciones",
-                        entidad_tipo="Cuidador",
-                        entidad_id=cuidador.id,
-                        detalle=(
-                            f"Falta habilidad {hab_req.habilidad.name}: "
-                            f"nivel {nivel} < {hab_req.nivel_minimo} para tarea {tarea.id}"
-                        )
+                        entidad_tipo="Tarea",
+                        entidad_id=tarea.id,
+                        detalle=f"Cuidador asignado {cuidador_id} no existe"
                     ))
-            
-            # Verificar certificaciones
-            for cert in tarea.certificaciones_requeridas:
-                if cert not in cuidador.certificaciones:
-                    violaciones.append(ViolacionInvariante(
-                        invariante="INV-1-habilidades-certificaciones",
-                        entidad_tipo="Cuidador",
-                        entidad_id=cuidador.id,
-                        detalle=f"Falta certificación {cert.name} para tarea {tarea.id}"
-                    ))
+                    continue
+
+                # Verificar habilidades
+                for hab_req in tarea.habilidades_requeridas:
+                    nivel = cuidador.habilidades.get(hab_req.habilidad, 0)
+                    if nivel < hab_req.nivel_minimo:
+                        violaciones.append(ViolacionInvariante(
+                            invariante="INV-1-habilidades-certificaciones",
+                            entidad_tipo="Cuidador",
+                            entidad_id=cuidador.id,
+                            detalle=(
+                                f"Falta habilidad {hab_req.habilidad.name}: "
+                                f"nivel {nivel} < {hab_req.nivel_minimo} "
+                                f"para tarea {tarea.id}"
+                            )
+                        ))
+
+                # Verificar certificaciones
+                for cert in tarea.certificaciones_requeridas:
+                    if cert not in cuidador.certificaciones:
+                        violaciones.append(ViolacionInvariante(
+                            invariante="INV-1-habilidades-certificaciones",
+                            entidad_tipo="Cuidador",
+                            entidad_id=cuidador.id,
+                            detalle=f"Falta certificación {cert.name} para tarea {tarea.id}"
+                        ))
     
     return violaciones
 
@@ -133,8 +132,9 @@ def _verificar_invariante_3_una_tarea_activa(mundo: Mundo) -> List[ViolacionInva
     
     tareas_por_cuidador: Dict[str, List[Tarea]] = {}
     for tarea in mundo.tareas.values():
-        if tarea.cuidador_asignado and tarea.estado in estados_activos:
-            tareas_por_cuidador.setdefault(tarea.cuidador_asignado, []).append(tarea)
+        if tarea.estado in estados_activos:
+            for cuidador_id in set(tarea.cuidadores_asignados):
+                tareas_por_cuidador.setdefault(cuidador_id, []).append(tarea)
     
     for cuidador_id, tareas in tareas_por_cuidador.items():
         if len(tareas) > 1:

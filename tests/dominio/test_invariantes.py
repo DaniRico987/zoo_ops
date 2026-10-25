@@ -51,7 +51,7 @@ class TestInvariante1HabilidadesCuidador:
             habilidades_requeridas=(HabilidadRequerida(Habilidad.MANEJO_FELINOS, 4),),
             certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE}),
             estado=EstadoTarea.EN_CURSO,
-            cuidador_asignado="c1"
+            cuidadores_asignados=("c1",)
         )
         
         mundo = Mundo(cuidadores={"c1": cuidador}, tareas={"t1": tarea})
@@ -71,7 +71,7 @@ class TestInvariante1HabilidadesCuidador:
             id="t1", tipo="captura",
             habilidades_requeridas=(HabilidadRequerida(Habilidad.MANEJO_FELINOS, 4),),
             estado=EstadoTarea.EN_CURSO,
-            cuidador_asignado="c1"
+            cuidadores_asignados=("c1",)
         )
         
         mundo = Mundo(cuidadores={"c1": cuidador}, tareas={"t1": tarea})
@@ -92,7 +92,7 @@ class TestInvariante1HabilidadesCuidador:
             id="t1", tipo="captura",
             certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE}),
             estado=EstadoTarea.EN_CURSO,
-            cuidador_asignado="c1"
+            cuidadores_asignados=("c1",)
         )
         
         mundo = Mundo(cuidadores={"c1": cuidador}, tareas={"t1": tarea})
@@ -100,6 +100,34 @@ class TestInvariante1HabilidadesCuidador:
         violaciones = _verificar_invariante_1_habilidades_cuidador(mundo)
         assert len(violaciones) == 1
         assert "TRANQUILIZANTE" in violaciones[0].detalle
+
+    def test_revisa_habilidades_de_cada_cuidador_asignado(self):
+        cuidador_valido = Cuidador(
+            id="c1", nombre="Válido",
+            habilidades={Habilidad.MANEJO_FELINOS: 4},
+            estado=EstadoCuidador.EJECUTANDO,
+        )
+        cuidador_sin_habilidad = Cuidador(
+            id="c2", nombre="Sin habilidad",
+            estado=EstadoCuidador.EJECUTANDO,
+        )
+        tarea = Tarea(
+            id="t1", tipo="captura",
+            habilidades_requeridas=(
+                HabilidadRequerida(Habilidad.MANEJO_FELINOS, 4),
+            ),
+            estado=EstadoTarea.EN_CURSO,
+            cuidadores_asignados=("c1", "c2"),
+        )
+        mundo = Mundo(
+            cuidadores={"c1": cuidador_valido, "c2": cuidador_sin_habilidad},
+            tareas={"t1": tarea},
+        )
+
+        violaciones = _verificar_invariante_1_habilidades_cuidador(mundo)
+
+        assert len(violaciones) == 1
+        assert violaciones[0].entidad_id == "c2"
     
     def test_solo_tareas_activas(self):
         """Solo verifica tareas en ASIGNADA, EN_CURSO, PAUSADA."""
@@ -114,7 +142,7 @@ class TestInvariante1HabilidadesCuidador:
             id="t1", tipo="captura",
             habilidades_requeridas=(HabilidadRequerida(Habilidad.MANEJO_FELINOS, 4),),
             estado=EstadoTarea.PENDIENTE,
-            cuidador_asignado="c1"
+            cuidadores_asignados=("c1",)
         )
         
         # Tarea ASIGNADA - sí debe verificar
@@ -122,7 +150,7 @@ class TestInvariante1HabilidadesCuidador:
             id="t2", tipo="captura",
             habilidades_requeridas=(HabilidadRequerida(Habilidad.MANEJO_FELINOS, 4),),
             estado=EstadoTarea.ASIGNADA,
-            cuidador_asignado="c1"
+            cuidadores_asignados=("c1",)
         )
         
         mundo = Mundo(
@@ -187,7 +215,10 @@ class TestInvariante3UnaTareaActiva:
     
     def test_cuidador_una_tarea_activa(self):
         cuidador = Cuidador(id="c1", nombre="Test", estado=EstadoCuidador.EJECUTANDO)
-        tarea = Tarea(id="t1", tipo="test", estado=EstadoTarea.EN_CURSO, cuidador_asignado="c1")
+        tarea = Tarea(
+            id="t1", tipo="test", estado=EstadoTarea.EN_CURSO,
+            cuidadores_asignados=("c1",),
+        )
         mundo = Mundo(cuidadores={"c1": cuidador}, tareas={"t1": tarea})
         
         violaciones = _verificar_invariante_3_una_tarea_activa(mundo)
@@ -195,13 +226,20 @@ class TestInvariante3UnaTareaActiva:
     
     def test_cuidador_dos_tareas_activas(self):
         cuidador = Cuidador(id="c1", nombre="Test", estado=EstadoCuidador.EJECUTANDO)
-        t1 = Tarea(id="t1", tipo="test", estado=EstadoTarea.EN_CURSO, cuidador_asignado="c1")
-        t2 = Tarea(id="t2", tipo="test", estado=EstadoTarea.ASIGNADA, cuidador_asignado="c1")
+        t1 = Tarea(
+            id="t1", tipo="test", estado=EstadoTarea.EN_CURSO,
+            cuidadores_asignados=("c0", "c1"),
+        )
+        t2 = Tarea(
+            id="t2", tipo="test", estado=EstadoTarea.ASIGNADA,
+            cuidadores_asignados=("c1",),
+        )
         mundo = Mundo(cuidadores={"c1": cuidador}, tareas={"t1": t1, "t2": t2})
         
         violaciones = _verificar_invariante_3_una_tarea_activa(mundo)
         assert len(violaciones) == 1
         assert "2 tareas activas" in violaciones[0].detalle
+        assert violaciones[0].entidad_id == "c1"
 
 
 class TestInvariante4NoVerificada:
@@ -420,7 +458,7 @@ class TestVerificarInvariantesCompleto:
         tarea = Tarea(
             id="t1", tipo="test",
             habilidades_requeridas=(HabilidadRequerida(Habilidad.MANEJO_FELINOS, 4),),
-            estado=EstadoTarea.EN_CURSO, cuidador_asignado="c1"
+            estado=EstadoTarea.EN_CURSO, cuidadores_asignados=("c1",)
         )
         mundo = Mundo(cuidadores={"c1": cuidador}, tareas={"t1": tarea})
         

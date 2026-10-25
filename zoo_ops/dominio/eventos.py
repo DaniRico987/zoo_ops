@@ -66,7 +66,7 @@ def crear_evento(
 ) -> Evento:
     """Crea un evento usando el contador local del registro indicado."""
     return Evento(
-        id=registro_eventos._siguiente_id_evento(),
+        id=registro_eventos.siguiente_id_evento(),
         momento=momento,
         tipo=tipo,
         entidad_tipo=entidad_tipo,
@@ -92,7 +92,7 @@ class RegistroEventos:
         self._eventos: List[Evento] = []
         self._ultimo_id_evento = 0
 
-    def _siguiente_id_evento(self) -> int:
+    def siguiente_id_evento(self) -> int:
         """Genera un ID incremental, aislado de los demás registros."""
         self._ultimo_id_evento += 1
         return self._ultimo_id_evento
@@ -110,6 +110,7 @@ class RegistroEventos:
     def anexar(self, evento: Evento) -> None:
         """Añade un evento al registro, rechazando IDs duplicados."""
         self.validar_anexo(evento)
+        self._ultimo_id_evento = max(self._ultimo_id_evento, evento.id)
         self._eventos.append(evento)
 
     def obtener_todos(self) -> List[Evento]:
@@ -153,7 +154,10 @@ _ENTIDADES_CAMBIO_ESTADO = {
 }
 
 # Campos de entidad que un evento CAMBIO_ESTADO puede modificar además de `estado`.
-_CAMPOS_EXTRA_CAMBIO_ESTADO = ("ubicacion", "cuidador_asignado")
+_CAMPOS_EXTRA_CAMBIO_ESTADO = {
+    "ubicacion": "ubicacion",
+    "cuidadores_ids": "cuidadores_asignados",
+}
 
 
 def _evento_no_soportado(evento: Evento, tipo: TipoEvento) -> EventoNoSoportado:
@@ -218,14 +222,17 @@ def _aplicar_cambio_estado(mundo: Mundo, evento: Evento) -> Mundo:
         ) from exc
 
     kwargs = {"estado": nuevo_estado}
-    for campo in _CAMPOS_EXTRA_CAMBIO_ESTADO:
-        if campo in evento.datos_extra:
-            if not hasattr(entidad, campo):
+    for campo_evento, campo_entidad in _CAMPOS_EXTRA_CAMBIO_ESTADO.items():
+        if campo_evento in evento.datos_extra:
+            if not hasattr(entidad, campo_entidad):
                 raise ErrorDominio(
-                    f"El campo {campo!r} no existe en {type(entidad).__name__} "
+                    f"El campo {campo_entidad!r} no existe en {type(entidad).__name__} "
                     f"({evento.entidad_tipo}:{evento.entidad_id})"
                 )
-            kwargs[campo] = evento.datos_extra[campo]
+            valor = evento.datos_extra[campo_evento]
+            if campo_evento == "cuidadores_ids":
+                valor = tuple(valor)
+            kwargs[campo_entidad] = valor
 
     mundo.sustituir_entidad(attr_name, evento.entidad_id, replace(entidad, **kwargs))
     return mundo

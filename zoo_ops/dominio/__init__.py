@@ -15,7 +15,7 @@ Módulos:
 from .enums import (
     TipoNodo, TipoRecinto, Medio, Peligrosidad, TipoVehiculo, TipoEquipo,
     Habilidad, Certificacion, EstadoCuidador, EstadoAnimal, EstadoVehiculo,
-    EstadoTarea, EstadoIncidente, TipoIncidente, TipoSensor, MedioPermitido,
+    EstadoEquipo, EstadoTarea, EstadoIncidente, TipoIncidente, TipoSensor, MedioPermitido,
     PrioridadTarea,
 )
 from .catalogos import (
@@ -59,7 +59,7 @@ __all__ = [
     # enums
     "TipoNodo", "TipoRecinto", "Medio", "Peligrosidad", "TipoVehiculo", "TipoEquipo",
     "Habilidad", "Certificacion", "EstadoCuidador", "EstadoAnimal", "EstadoVehiculo",
-    "EstadoTarea", "EstadoIncidente", "TipoIncidente", "TipoSensor", "MedioPermitido",
+    "EstadoEquipo", "EstadoTarea", "EstadoIncidente", "TipoIncidente", "TipoSensor", "MedioPermitido",
     "PrioridadTarea",
     # catalogos
     "ESPECIES_CATALOGO", "HABILIDADES_CATALOGO", "CERTIFICACIONES_CATALOGO",

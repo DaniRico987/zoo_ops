@@ -6,6 +6,7 @@ import pytest
 from zoo_ops.dominio.enums import (
     TipoNodo, TipoRecinto, Medio, Peligrosidad, TipoVehiculo, TipoEquipo,
     Habilidad, Certificacion, EstadoCuidador, EstadoAnimal, EstadoVehiculo,
+    EstadoEquipo,
     EstadoTarea, EstadoIncidente, TipoIncidente, TipoSensor, MedioPermitido,
     PrioridadTarea
 )
@@ -91,6 +92,11 @@ class TestEnumsValores:
         assert EstadoVehiculo.EN_RUTA
         assert EstadoVehiculo.EN_USO
         assert EstadoVehiculo.EN_MANTENIMIENTO
+
+    def test_estado_equipo(self):
+        assert EstadoEquipo.DISPONIBLE
+        assert EstadoEquipo.EN_USO
+        assert EstadoEquipo.EN_MANTENIMIENTO
     
     def test_estado_tarea(self):
         assert EstadoTarea.PENDIENTE
