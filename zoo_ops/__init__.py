@@ -1,0 +1,1 @@
+"""zoo_ops - Sistema de coordinación y simulación de zoológico."""
