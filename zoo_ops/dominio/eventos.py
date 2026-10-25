@@ -53,24 +53,8 @@ class Evento:
     datos_extra: Dict[str, Any] = field(default_factory=dict)
 
 
-# Contador global para IDs de eventos (se usa en el registro)
-_contador_eventos: int = 0
-
-
-def _siguiente_id_evento() -> int:
-    """Genera el siguiente ID de evento."""
-    global _contador_eventos
-    _contador_eventos += 1
-    return _contador_eventos
-
-
-def reiniciar_contador_eventos() -> None:
-    """Reinicia el contador de eventos (útil para tests)."""
-    global _contador_eventos
-    _contador_eventos = 0
-
-
 def crear_evento(
+    registro_eventos: "RegistroEventos",
     momento: int,
     tipo: TipoEvento,
     entidad_tipo: str,
@@ -80,9 +64,9 @@ def crear_evento(
     causa: str,
     datos_extra: Optional[Dict[str, Any]] = None
 ) -> Evento:
-    """Crea un nuevo evento con ID automático."""
+    """Crea un evento usando el contador local del registro indicado."""
     return Evento(
-        id=_siguiente_id_evento(),
+        id=registro_eventos._siguiente_id_evento(),
         momento=momento,
         tipo=tipo,
         entidad_tipo=entidad_tipo,
@@ -106,6 +90,12 @@ class RegistroEventos:
 
     def __init__(self):
         self._eventos: List[Evento] = []
+        self._ultimo_id_evento = 0
+
+    def _siguiente_id_evento(self) -> int:
+        """Genera un ID incremental, aislado de los demás registros."""
+        self._ultimo_id_evento += 1
+        return self._ultimo_id_evento
 
     def validar_anexo(self, evento: Evento) -> None:
         """

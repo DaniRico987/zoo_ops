@@ -28,7 +28,7 @@ from zoo_ops.dominio.enums import (
 )
 from zoo_ops.dominio.catalogos import ESPECIES_CATALOGO
 from zoo_ops.dominio.reservas import RegistroReservas, Reserva, TipoRecurso, reservar_atomico
-from zoo_ops.dominio.eventos import RegistroEventos, crear_evento, TipoEvento, reiniciar_contador_eventos
+from zoo_ops.dominio.eventos import RegistroEventos, crear_evento, TipoEvento
 from zoo_ops.dominio.estados import ejecutar_transicion
 
 
@@ -435,7 +435,6 @@ class TestInvariante7Eventos:
         self.registro = RegistroReservas()
 
     def test_eventos_reproducen_el_mundo(self):
-        reiniciar_contador_eventos()
         inicial = Mundo(cuidadores={"c1": Cuidador(id="c1", nombre="C")})
         mundo = copy.deepcopy(inicial)
         registro = RegistroEventos()

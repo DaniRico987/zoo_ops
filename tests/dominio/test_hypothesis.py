@@ -34,7 +34,7 @@ from zoo_ops.dominio.estados import (
 )
 from zoo_ops.dominio.eventos import (
     Evento, RegistroEventos, TipoEvento, reconstruir_estado,
-    reiniciar_contador_eventos, verificar_reconstruccion,
+    verificar_reconstruccion,
 )
 from zoo_ops.dominio.invariantes import verificar_invariantes
 from zoo_ops.dominio.reservas import (
@@ -274,7 +274,6 @@ class ReconstruccionHonestaMachine(RuleBasedStateMachine):
 
     @initialize()
     def setup(self):
-        reiniciar_contador_eventos()
         self.mundo_vivo = Mundo(
             cuidadores={"c1": Cuidador(
                 id="c1", nombre="C", estado=EstadoCuidador.FUERA_DE_TURNO,
@@ -415,10 +414,37 @@ TestReconstruccionHonesta.settings = settings(
 # Secuencias de transiciones (mundo vivo mutado solo por ejecutar_transicion)
 # ============================================================================
 
+@given(
+    momentos=st.lists(st.integers(min_value=0, max_value=100), max_size=20),
+    data=st.data(),
+)
+@settings(max_examples=50)
+def test_reconstruccion_coincide_para_transiciones_con_tiempo_no_decreciente(
+    momentos, data,
+):
+    inicial = Mundo(cuidadores={"c1": Cuidador(
+        id="c1", nombre="C", estado=EstadoCuidador.FUERA_DE_TURNO,
+    )})
+    mundo = copy.deepcopy(inicial)
+    registro = RegistroEventos()
+
+    for momento in sorted(momentos):
+        actual = mundo.cuidadores["c1"].estado
+        destinos = TRANSICIONES_CUIDADOR.get(actual, frozenset())
+        if not destinos:
+            break
+        nuevo = data.draw(st.sampled_from(sorted(destinos, key=lambda e: e.name)))
+        ejecutar_transicion(
+            mundo, registro, "Cuidador", "c1", nuevo, momento, "secuencia",
+        )
+
+    reconstruido = reconstruir_estado(registro.obtener_todos(), copy.deepcopy(inicial))
+    assert not verificar_reconstruccion(mundo, reconstruido)
+
+
 @given(data=st.data())
 @settings(max_examples=50)
 def test_secuencia_transiciones_cuidador(data):
-    reiniciar_contador_eventos()
     inicial = Mundo(cuidadores={"c1": Cuidador(
         id="c1", nombre="C", estado=EstadoCuidador.FUERA_DE_TURNO,
     )})
@@ -447,7 +473,6 @@ def test_secuencia_transiciones_cuidador(data):
 @given(data=st.data())
 @settings(max_examples=50)
 def test_secuencia_transiciones_animal(data):
-    reiniciar_contador_eventos()
     inicial = Mundo(
         animales={"a1": Animal(
             id="a1",
@@ -489,7 +514,6 @@ def test_secuencia_transiciones_animal(data):
 @given(data=st.data())
 @settings(max_examples=50)
 def test_secuencia_tarea_con_reserva_y_asignacion(data):
-    reiniciar_contador_eventos()
     inicial = Mundo(
         cuidadores={"c1": Cuidador(
             id="c1", nombre="C", estado=EstadoCuidador.DISPONIBLE,

@@ -18,7 +18,8 @@ from zoo_ops.dominio.enums import (
     TipoVehiculo,
 )
 from zoo_ops.dominio.errores import (
-    DependenciaInexistente, ErrorDominio, EventoDuplicado, TransicionInvalida,
+    DependenciaInexistente, ErrorDominio, EventoDuplicado, TiempoRetrocede,
+    TransicionInvalida,
 )
 from zoo_ops.dominio.estados import (
     TRANSICIONES_ANIMAL, TRANSICIONES_CUIDADOR, TRANSICIONES_INCIDENTE,
@@ -27,7 +28,7 @@ from zoo_ops.dominio.estados import (
     validar_transicion_incidente_extra, validar_transicion_tarea_extra,
 )
 from zoo_ops.dominio.eventos import (
-    RegistroEventos, TipoEvento, crear_evento, reiniciar_contador_eventos,
+    RegistroEventos, TipoEvento, crear_evento,
 )
 
 
@@ -185,10 +186,11 @@ class TestCuidador:
             )
 
     def test_fallo_de_anexo_no_muta_el_mundo(self):
-        reiniciar_contador_eventos()
         mundo = Mundo(cuidadores={"c1": _cuidador()})
         registro = RegistroEventos()
+        otro_registro = RegistroEventos()
         previo = crear_evento(
+            otro_registro,
             momento=0,
             tipo=TipoEvento.CAMBIO_ESTADO,
             entidad_tipo="Cuidador",
@@ -198,7 +200,6 @@ class TestCuidador:
             causa="previo",
         )
         registro.anexar(previo)
-        reiniciar_contador_eventos()
         antes = copy.deepcopy(mundo)
 
         with pytest.raises(EventoDuplicado):
@@ -210,6 +211,40 @@ class TestCuidador:
         assert mundo == antes
         assert len(registro) == 1
         assert registro[0] is previo
+
+    def test_transicion_con_tiempo_menor_no_muta_mundo_ni_registro(self):
+        mundo = Mundo(
+            cuidadores={"c1": _cuidador()},
+            tiempo_actual=20,
+        )
+        registro = RegistroEventos()
+        antes = copy.deepcopy(mundo)
+
+        with pytest.raises(TiempoRetrocede):
+            ejecutar_transicion(
+                mundo, registro, "Cuidador", "c1",
+                EstadoCuidador.DISPONIBLE, 19, "reloj retrocede",
+            )
+
+        assert mundo == antes
+        assert len(registro) == 0
+
+    def test_transiciones_en_el_mismo_instante_se_aceptan(self):
+        mundo = Mundo(cuidadores={"c1": _cuidador()})
+        registro = RegistroEventos()
+
+        primero = ejecutar_transicion(
+            mundo, registro, "Cuidador", "c1",
+            EstadoCuidador.DISPONIBLE, 20, "inicio",
+        )
+        segundo = ejecutar_transicion(
+            mundo, registro, "Cuidador", "c1",
+            EstadoCuidador.ASIGNADO, 20, "asignacion",
+        )
+
+        assert primero.momento == segundo.momento == 20
+        assert primero.id < segundo.id
+        assert mundo.tiempo_actual == 20
 
     def test_estado_que_no_pertenece_al_enum_lanza_error_de_dominio(self):
         mundo = Mundo(cuidadores={"c1": _cuidador()})
@@ -595,6 +630,29 @@ class TestIncidente:
         mundo = Mundo(
             incidentes={"i1": incidente},
             tareas={"t1": Tarea(id="t1", tipo="test")},
+            animales={"a1": _animal(EstadoAnimal.EN_RECINTO)},
+        )
+
+        with pytest.raises(TransicionInvalida, match="tareas"):
+            ejecutar_transicion(
+                mundo, RegistroEventos(), "Incidente", "i1",
+                EstadoIncidente.CERRADO, 10, "cerrar",
+            )
+
+        assert mundo.incidentes["i1"].estado == EstadoIncidente.CONTENIDO
+
+    def test_cerrar_considera_tareas_vinculadas_por_incidente_origen(self):
+        incidente = _incidente(
+            EstadoIncidente.CONTENIDO,
+            animal_relacionado="a1",
+        )
+        mundo = Mundo(
+            incidentes={"i1": incidente},
+            tareas={
+                "t1": Tarea(
+                    id="t1", tipo="test", incidente_origen="i1",
+                ),
+            },
             animales={"a1": _animal(EstadoAnimal.EN_RECINTO)},
         )
 

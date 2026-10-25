@@ -133,3 +133,15 @@ class EventoDuplicado(ErrorDominio):
     def __init__(self, evento_id: int):
         self.evento_id = evento_id
         super().__init__(f"Ya existe un evento con id {evento_id} en el registro")
+
+
+class TiempoRetrocede(ErrorDominio):
+    """Lanzada cuando una transición intenta retroceder el reloj del mundo."""
+
+    def __init__(self, tiempo_actual: int, tiempo_intentado: int):
+        self.tiempo_actual = tiempo_actual
+        self.tiempo_intentado = tiempo_intentado
+        super().__init__(
+            f"El tiempo no puede retroceder: actual {tiempo_actual}, "
+            f"intentado {tiempo_intentado}"
+        )

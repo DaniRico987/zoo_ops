@@ -16,7 +16,7 @@ from zoo_ops.dominio.enums import (
     Medio, TipoIncidente,
 )
 from zoo_ops.dominio.errores import (
-    DependenciaInexistente, ErrorDominio, TransicionInvalida,
+    DependenciaInexistente, ErrorDominio, TiempoRetrocede, TransicionInvalida,
 )
 from zoo_ops.dominio.entidades import Animal, Incidente, Mundo
 from zoo_ops.dominio.eventos import (
@@ -299,7 +299,7 @@ def validar_transicion_incidente_extra(
     Valida reglas extra para transiciones de Incidente leyendo el mundo.
 
     Al cerrar (CERRADO):
-    - todas las tareas generadas por el incidente deben estar COMPLETADA o CANCELADA;
+    - todas las tareas vinculadas al incidente deben estar COMPLETADA o CANCELADA;
     - si el incidente es de escape, el animal vinculado (`animal_relacionado`)
       debe existir y estar EN_RECINTO.
 
@@ -308,8 +308,13 @@ def validar_transicion_incidente_extra(
     if estado_nuevo != EstadoIncidente.CERRADO:
         return None
 
+    tareas_incidente = set(incidente.tareas_generadas)
+    tareas_incidente.update(
+        tarea.id for tarea in mundo.tareas.values()
+        if tarea.incidente_origen == incidente.id
+    )
     pendientes = []
-    for tarea_id in sorted(incidente.tareas_generadas):
+    for tarea_id in sorted(tareas_incidente):
         tarea = mundo.tareas.get(tarea_id)
         if tarea is None:
             raise ErrorDominio(
@@ -398,10 +403,14 @@ def ejecutar_transicion(
     Raises:
         ErrorDominio: Si la entidad no existe, el estado no pertenece al enum
             o falta un parámetro obligatorio
+        TiempoRetrocede: Si `tiempo` es menor que `mundo.tiempo_actual`
         TransicionInvalida: Si la transición no está permitida por la tabla o
             por una regla extra
         DependenciaInexistente: Si una dependencia de la tarea no existe
     """
+    if tiempo < mundo.tiempo_actual:
+        raise TiempoRetrocede(mundo.tiempo_actual, tiempo)
+
     # 1. Leer entidad y estado REAL del mundo
     entidad, estado_actual, enum_estado = _obtener_entidad_y_estado(
         mundo, entidad_tipo, entidad_id
@@ -449,6 +458,7 @@ def ejecutar_transicion(
 
     # 6. Crear evento
     evento = crear_evento(
+        registro_eventos,
         momento=tiempo,
         tipo=TipoEvento.CAMBIO_ESTADO,
         entidad_tipo=entidad_tipo,

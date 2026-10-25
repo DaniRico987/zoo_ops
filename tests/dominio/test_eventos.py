@@ -16,8 +16,7 @@ from zoo_ops.dominio.enums import EstadoAnimal, EstadoCuidador, EstadoTarea
 from zoo_ops.dominio.errores import ErrorDominio, EventoDuplicado, EventoNoSoportado
 from zoo_ops.dominio.eventos import (
     EVENTOS_NO_RECONSTRUIBLES, Evento, RegistroEventos, TipoEvento,
-    aplicar_evento, crear_evento, reconstruir_estado,
-    reiniciar_contador_eventos, verificar_reconstruccion,
+    aplicar_evento, crear_evento, reconstruir_estado, verificar_reconstruccion,
 )
 
 
@@ -44,9 +43,10 @@ def _evento(tipo, entidad_tipo="Cuidador", entidad_id="c1", **kwargs):
 
 class TestEvento:
     def test_crear_evento_asigna_id_y_campos(self):
-        reiniciar_contador_eventos()
+        registro = RegistroEventos()
 
         evento = crear_evento(
+            registro,
             momento=100,
             tipo=TipoEvento.CAMBIO_ESTADO,
             entidad_tipo="Cuidador",
@@ -70,14 +70,30 @@ class TestEvento:
             evento.causa = "otra"
 
     def test_datos_extra_se_copian(self):
+        registro = RegistroEventos()
         evento = crear_evento(
-            1, TipoEvento.LECTURA_SENSOR, "Sensor", "s1", "", "", "lectura",
+            registro, 1, TipoEvento.LECTURA_SENSOR, "Sensor", "s1", "", "", "lectura",
             datos_extra={"valor": 25.5},
         )
         assert evento.datos_extra["valor"] == 25.5
 
 
 class TestRegistroEventos:
+    def test_registros_independientes_inician_ids_independientes(self):
+        registro_a = RegistroEventos()
+        registro_b = RegistroEventos()
+
+        evento_a = crear_evento(
+            registro_a, 10, TipoEvento.CAMBIO_ESTADO, "Cuidador", "c1",
+            "A", "B", "test",
+        )
+        evento_b = crear_evento(
+            registro_b, 10, TipoEvento.CAMBIO_ESTADO, "Cuidador", "c1",
+            "A", "B", "test",
+        )
+
+        assert evento_a.id == evento_b.id == 1
+
     def test_anexar_id_duplicado_falla(self):
         registro = RegistroEventos()
         e1 = _evento(TipoEvento.CAMBIO_ESTADO, id=7)
@@ -91,10 +107,9 @@ class TestRegistroEventos:
         assert registro[0] is e1
 
     def test_anexar_obtener_e_iterar(self):
-        reiniciar_contador_eventos()
         registro = RegistroEventos()
-        e1 = crear_evento(100, TipoEvento.CAMBIO_ESTADO, "Cuidador", "c1", "A", "B", "c")
-        e2 = crear_evento(200, TipoEvento.CAMBIO_ESTADO, "Animal", "a1", "C", "D", "c")
+        e1 = crear_evento(registro, 100, TipoEvento.CAMBIO_ESTADO, "Cuidador", "c1", "A", "B", "c")
+        e2 = crear_evento(registro, 200, TipoEvento.CAMBIO_ESTADO, "Animal", "a1", "C", "D", "c")
 
         registro.anexar(e1)
         registro.anexar(e2)
@@ -113,11 +128,10 @@ class TestRegistroEventos:
         assert len(registro) == 1
 
     def test_filtros(self):
-        reiniciar_contador_eventos()
         registro = RegistroEventos()
-        registro.anexar(crear_evento(100, TipoEvento.CAMBIO_ESTADO, "Cuidador", "c1", "A", "B", "c"))
-        registro.anexar(crear_evento(150, TipoEvento.RESERVA_CREADA, "Vehiculo", "v1", "", "", "c"))
-        registro.anexar(crear_evento(200, TipoEvento.CAMBIO_ESTADO, "Cuidador", "c1", "B", "C", "c"))
+        registro.anexar(crear_evento(registro, 100, TipoEvento.CAMBIO_ESTADO, "Cuidador", "c1", "A", "B", "c"))
+        registro.anexar(crear_evento(registro, 150, TipoEvento.RESERVA_CREADA, "Vehiculo", "v1", "", "", "c"))
+        registro.anexar(crear_evento(registro, 200, TipoEvento.CAMBIO_ESTADO, "Cuidador", "c1", "B", "C", "c"))
 
         assert len(registro.obtener_por_entidad("Cuidador", "c1")) == 2
         assert len(registro.obtener_por_tipo(TipoEvento.RESERVA_CREADA)) == 1

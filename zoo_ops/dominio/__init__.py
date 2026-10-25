@@ -36,7 +36,7 @@ from .estados import (
 )
 from .eventos import (
     TipoEvento, Evento, RegistroEventos, crear_evento, aplicar_evento,
-    reconstruir_estado, verificar_reconstruccion, reiniciar_contador_eventos,
+    reconstruir_estado, verificar_reconstruccion,
     EVENTOS_NO_RECONSTRUIBLES,
 )
 from .reservas import (
@@ -52,7 +52,7 @@ from .errores import (
     ErrorDominio, TransicionInvalida, ReservaInvalida, ReservaAtomicaFallida,
     RecursosInvalidos, InvarianzaViolada, RecursoNoDisponible, HabilidadInsuficiente,
     CertificacionFaltante, DependenciasPendientes, DependenciaInexistente,
-    EventoNoSoportado, EventoDuplicado,
+    EventoNoSoportado, EventoDuplicado, TiempoRetrocede,
 )
 
 __all__ = [
@@ -76,7 +76,7 @@ __all__ = [
     "validar_transicion_tarea_extra", "validar_transicion_incidente_extra",
     # eventos
     "TipoEvento", "Evento", "RegistroEventos", "crear_evento", "aplicar_evento",
-    "reconstruir_estado", "verificar_reconstruccion", "reiniciar_contador_eventos",
+    "reconstruir_estado", "verificar_reconstruccion",
     "EVENTOS_NO_RECONSTRUIBLES",
     # reservas
     "TipoRecurso", "Reserva", "RegistroReservas",
@@ -89,5 +89,5 @@ __all__ = [
     "ErrorDominio", "TransicionInvalida", "ReservaInvalida", "ReservaAtomicaFallida",
     "RecursosInvalidos", "InvarianzaViolada", "RecursoNoDisponible", "HabilidadInsuficiente",
     "CertificacionFaltante", "DependenciasPendientes", "DependenciaInexistente",
-    "EventoNoSoportado", "EventoDuplicado",
+    "EventoNoSoportado", "EventoDuplicado", "TiempoRetrocede",
 ]
