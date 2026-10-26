@@ -8,6 +8,7 @@ Módulos:
 - estados: Máquinas de estado declarativas
 - eventos: Eventos inmutables y reconstrucción de estado
 - reservas: Sistema de reservas atómicas
+- plan: Planes de ejecución y validación de requisitos de recursos
 - invariantes: Verificación de invariantes del sistema
 - errores: Excepciones personalizadas
 """
@@ -37,7 +38,7 @@ from .estados import (
 from .eventos import (
     TipoEvento, Evento, RegistroEventos, crear_evento, aplicar_evento,
     reconstruir_estado, verificar_reconstruccion,
-    EVENTOS_NO_RECONSTRUIBLES,
+    plan_a_datos_extra, plan_desde_datos_extra, EVENTOS_NO_RECONSTRUIBLES,
 )
 from .reservas import (
     TipoRecurso, Reserva, RegistroReservas,
@@ -47,6 +48,7 @@ from .reservas import (
 from .plan import (
     PlanEjecucion, cubre_requisitos_cuidadores, validar_capacidad_vehiculo,
     validar_ruta_terrestre, validar_plan, exigir_plan_valido,
+    registrar_plan_con_evento, liberar_plan_con_evento,
 )
 from .invariantes import (
     verificar_invariantes, ViolacionInvariante, NoVerificada,
@@ -81,6 +83,7 @@ __all__ = [
     # eventos
     "TipoEvento", "Evento", "RegistroEventos", "crear_evento", "aplicar_evento",
     "reconstruir_estado", "verificar_reconstruccion",
+    "plan_a_datos_extra", "plan_desde_datos_extra",
     "EVENTOS_NO_RECONSTRUIBLES",
     # reservas
     "TipoRecurso", "Reserva", "RegistroReservas",
@@ -89,7 +92,8 @@ __all__ = [
     # plan
     "PlanEjecucion", "cubre_requisitos_cuidadores",
     "validar_capacidad_vehiculo", "validar_ruta_terrestre", "validar_plan",
-    "exigir_plan_valido",
+    "exigir_plan_valido", "registrar_plan_con_evento",
+    "liberar_plan_con_evento",
     # invariantes
     "verificar_invariantes", "ViolacionInvariante", "NoVerificada",
     "formatear_violaciones", "formatear_no_verificadas", "assert_sin_violaciones",

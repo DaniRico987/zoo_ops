@@ -13,6 +13,7 @@ from zoo_ops.dominio.invariantes import (
     _verificar_invariante_4_capacidad_vehiculo,
     _verificar_invariante_5_ruta_jeep,
     _verificar_invariante_9_planes_consistentes,
+    _verificar_invariante_10_tarea_plan,
     _verificar_invariante_6_animal_en_recinto_valido,
     _verificar_invariante_8_dependencias_tarea,
     verificar_invariante_eventos,
@@ -495,7 +496,7 @@ def test_inv9_no_viola_un_plan_con_referencias_existentes():
     assert _verificar_invariante_9_planes_consistentes(mundo) == []
 
 
-def test_tarea_activa_sin_plan_deja_inv4_e_inv5_sin_verificar():
+def test_tarea_activa_sin_plan_viola_inv10_sin_omitir_inv4_inv5():
     tarea = Tarea(
         id="t1", tipo="test", estado=EstadoTarea.ASIGNADA,
         cuidadores_asignados=("c1",),
@@ -505,12 +506,53 @@ def test_tarea_activa_sin_plan_deja_inv4_e_inv5_sin_verificar():
         cuidadores={"c1": Cuidador("c1", "Test", estado=EstadoCuidador.EJECUTANDO)},
     )
 
-    _, no_verificadas = verificar_invariantes(mundo, RegistroReservas())
+    violaciones, no_verificadas = verificar_invariantes(
+        mundo, RegistroReservas(),
+    )
 
-    assert {
-        item.invariante for item in no_verificadas
-    } == {"INV-4-capacidad-vehiculo", "INV-5-jeep-aristas-validas"}
-    assert all("tarea activa t1" in item.motivo for item in no_verificadas)
+    assert any(
+        item.invariante == "INV-10-tarea-plan" and item.entidad_id == "t1"
+        for item in violaciones
+    )
+    assert not any(
+        item.invariante in {
+            "INV-4-capacidad-vehiculo", "INV-5-jeep-aristas-validas",
+        }
+        for item in no_verificadas
+    )
+
+
+def test_inv10_tarea_activa_con_plan_y_cuidadores_coincidentes():
+    tarea = Tarea(
+        id="t1", tipo="test", estado=EstadoTarea.ASIGNADA,
+        cuidadores_asignados=("c1",),
+    )
+    plan = PlanEjecucion(
+        tarea_id="t1", cuidadores=("c1",), desde=10, hasta=20,
+    )
+    mundo = Mundo(
+        tareas={"t1": tarea},
+        cuidadores={"c1": Cuidador("c1", "Test")},
+        planes={"t1": plan},
+    )
+
+    assert _verificar_invariante_10_tarea_plan(mundo) == []
+
+
+def test_inv10_detecta_cuidadores_distintos_entre_tarea_y_plan():
+    tarea = Tarea(
+        id="t1", tipo="test", estado=EstadoTarea.ASIGNADA,
+        cuidadores_asignados=("c1",),
+    )
+    plan = PlanEjecucion(
+        tarea_id="t1", cuidadores=("c2",), desde=10, hasta=20,
+    )
+    mundo = Mundo(tareas={"t1": tarea}, planes={"t1": plan})
+
+    violaciones = _verificar_invariante_10_tarea_plan(mundo)
+
+    assert len(violaciones) == 1
+    assert violaciones[0].invariante == "INV-10-tarea-plan"
 
 
 class TestInvariante6AnimalEnRecintoValido:

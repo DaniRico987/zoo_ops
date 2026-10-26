@@ -244,22 +244,36 @@ def _verificar_invariante_9_planes_consistentes(
     return violaciones
 
 
-def _no_verificadas_sin_plan(
+def _verificar_invariante_10_tarea_plan(
     mundo: Mundo,
-    invariante: str,
-) -> List[NoVerificada]:
-    """Enumera tareas activas cuyo plan todavía no está registrado."""
+) -> List[ViolacionInvariante]:
+    """Comprueba que cada tarea activa tenga el plan y cuidadores asignados."""
+    violaciones = []
     estados_activos = {
         EstadoTarea.ASIGNADA, EstadoTarea.EN_CURSO, EstadoTarea.PAUSADA,
     }
-    return [
-        NoVerificada(
-            invariante=invariante,
-            motivo=f"la tarea activa {tarea.id} todavía no tiene un plan de ejecución",
-        )
-        for tarea in mundo.tareas.values()
-        if tarea.estado in estados_activos and tarea.id not in mundo.planes
-    ]
+    for tarea in mundo.tareas.values():
+        if tarea.estado not in estados_activos:
+            continue
+        plan = mundo.planes.get(tarea.id)
+        if plan is None:
+            violaciones.append(ViolacionInvariante(
+                invariante="INV-10-tarea-plan",
+                entidad_tipo="Tarea",
+                entidad_id=tarea.id,
+                detalle=f"La tarea activa {tarea.id} no tiene un plan de ejecución",
+            ))
+        elif tarea.cuidadores_asignados != plan.cuidadores:
+            violaciones.append(ViolacionInvariante(
+                invariante="INV-10-tarea-plan",
+                entidad_tipo="Tarea",
+                entidad_id=tarea.id,
+                detalle=(
+                    f"Los cuidadores asignados a la tarea {tarea.id} no "
+                    "coinciden con los del plan"
+                ),
+            ))
+    return violaciones
 
 
 # ============================================================================
@@ -420,12 +434,6 @@ def verificar_invariantes(
     # Invariantes 4 y 5: planes de ejecución
     todas_violaciones.extend(_verificar_invariante_4_capacidad_vehiculo(mundo))
     todas_violaciones.extend(_verificar_invariante_5_ruta_jeep(mundo))
-    no_verificadas.extend(
-        _no_verificadas_sin_plan(mundo, "INV-4-capacidad-vehiculo")
-    )
-    no_verificadas.extend(
-        _no_verificadas_sin_plan(mundo, "INV-5-jeep-aristas-validas")
-    )
     
     # Invariante 6: Animal en recinto válido
     todas_violaciones.extend(_verificar_invariante_6_animal_en_recinto_valido(mundo))
@@ -450,6 +458,9 @@ def verificar_invariantes(
 
     # Invariante 9: Referencias de planes existentes
     todas_violaciones.extend(_verificar_invariante_9_planes_consistentes(mundo))
+
+    # Invariante 10: Cada tarea activa conserva su plan y el equipo asignado.
+    todas_violaciones.extend(_verificar_invariante_10_tarea_plan(mundo))
     
     return todas_violaciones, no_verificadas
 

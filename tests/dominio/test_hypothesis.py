@@ -148,7 +148,13 @@ def test_transiciones_vehiculo_validas_nunca_fallan(data):
 def test_transiciones_tarea_validas_nunca_fallan(data):
     t = data.draw(tarea_strategy())
     c1 = Cuidador(id="c1", nombre="C", estado=EstadoCuidador.DISPONIBLE)
-    mundo = Mundo(cuidadores={"c1": c1}, tareas={"t1": t})
+    mundo = Mundo(
+        cuidadores={"c1": c1},
+        tareas={"t1": t},
+        planes={"t1": PlanEjecucion(
+            tarea_id="t1", cuidadores=("c1",), desde=0, hasta=100,
+        )},
+    )
     registro = RegistroEventos()
 
     destinos = TRANSICIONES_TAREA.get(t.estado, frozenset())
@@ -156,10 +162,8 @@ def test_transiciones_tarea_validas_nunca_fallan(data):
         return
 
     nuevo = data.draw(st.sampled_from(sorted(destinos, key=lambda e: e.name)))
-    parametros = {"cuidadores_ids": ("c1",)} if nuevo == EstadoTarea.ASIGNADA else {}
-
     ejecutar_transicion(
-        mundo, registro, "Tarea", "t1", nuevo, 10, "test", **parametros,
+        mundo, registro, "Tarea", "t1", nuevo, 10, "test",
     )
 
     assert mundo.tareas["t1"].estado == nuevo
@@ -308,6 +312,11 @@ class ReconstruccionHonestaMachine(RuleBasedStateMachine):
                     id="t1", tipo="test", dependencias=frozenset({"t0"}),
                 ),
             },
+            planes={
+                "t1": PlanEjecucion(
+                    tarea_id="t1", cuidadores=("c1",), desde=0, hasta=10000,
+                ),
+            },
         )
         self.registro = RegistroEventos()
         self.registro_reservas = RegistroReservas()
@@ -378,12 +387,9 @@ class ReconstruccionHonestaMachine(RuleBasedStateMachine):
                 if not destinos:
                     return
                 nuevo = _elegir_destino(destinos, self.paso)
-        parametros = (
-            {"cuidadores_ids": ("c1",)} if nuevo == EstadoTarea.ASIGNADA else {}
-        )
         ejecutar_transicion(
             self.mundo_vivo, self.registro, "Tarea", "t1",
-            nuevo, self.tiempo, "auto", **parametros,
+            nuevo, self.tiempo, "auto",
         )
 
     @invariant()
@@ -525,6 +531,9 @@ def test_secuencia_tarea_con_reserva_y_asignacion(data):
                 id="t1", tipo="test", dependencias=frozenset({"t0"}),
             ),
         },
+        planes={"t1": PlanEjecucion(
+            tarea_id="t1", cuidadores=("c1",), desde=0, hasta=10000,
+        )},
     )
     mundo = copy.deepcopy(inicial)
     registro = RegistroEventos()
@@ -541,12 +550,8 @@ def test_secuencia_tarea_con_reserva_y_asignacion(data):
             break
         nuevo = data.draw(st.sampled_from(sorted(destinos, key=lambda e: e.name)))
         tiempo += 10
-        parametros = (
-            {"cuidadores_ids": ("c1",)} if nuevo == EstadoTarea.ASIGNADA else {}
-        )
         ejecutar_transicion(
             mundo, registro, "Tarea", "t1", nuevo, tiempo, "secuencia",
-            **parametros,
         )
 
     violaciones, _ = verificar_invariantes(
@@ -570,11 +575,14 @@ def test_inv3_cuidador_con_tarea_activa():
     )
     t2 = Tarea(id="t2", tipo="test")
     mundo = Mundo(cuidadores={"c1": c1}, tareas={"t1": t1, "t2": t2})
+    mundo.registrar_plan(PlanEjecucion(
+        tarea_id="t2", cuidadores=("c1",), desde=0, hasta=100,
+    ))
 
     with pytest.raises(TransicionInvalida, match="INV-3"):
         ejecutar_transicion(
             mundo, RegistroEventos(), "Tarea", "t2",
-            EstadoTarea.ASIGNADA, 10, "asignar", cuidadores_ids=("c1",),
+            EstadoTarea.ASIGNADA, 10, "asignar",
         )
 
     assert mundo.tareas["t2"].estado == EstadoTarea.PENDIENTE

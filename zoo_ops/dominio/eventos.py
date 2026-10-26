@@ -33,6 +33,8 @@ class TipoEvento(Enum):
     INCIDENTE_GENERADO = auto()
     LECTURA_SENSOR = auto()
     TICK_RELOJ = auto()
+    PLAN_REGISTRADO = auto()
+    PLAN_LIBERADO = auto()
 
 
 # ============================================================================
@@ -76,6 +78,59 @@ def crear_evento(
         causa=causa,
         datos_extra=datos_extra or {}
     )
+
+
+def plan_a_datos_extra(plan: "PlanEjecucion") -> Dict[str, Any]:
+    """Serializa todos los campos de un plan en datos aptos para un evento."""
+    return {
+        "tarea_id": plan.tarea_id,
+        "cuidadores": tuple(plan.cuidadores),
+        "desde": plan.desde,
+        "hasta": plan.hasta,
+        "vehiculo_id": plan.vehiculo_id,
+        "equipos": tuple(plan.equipos),
+        "animales_transportados": tuple(plan.animales_transportados),
+        "ruta": tuple(plan.ruta),
+    }
+
+
+def plan_desde_datos_extra(datos: Dict[str, Any]) -> "PlanEjecucion":
+    """Reconstruye un plan y normaliza a tuplas sus campos de colección."""
+    from zoo_ops.dominio.plan import PlanEjecucion
+
+    if not isinstance(datos, dict):
+        raise ErrorDominio("datos_extra del plan debe ser un diccionario")
+    campos = (
+        "tarea_id", "cuidadores", "desde", "hasta", "vehiculo_id",
+        "equipos", "animales_transportados", "ruta",
+    )
+    faltantes = [campo for campo in campos if campo not in datos]
+    if faltantes:
+        raise ErrorDominio(
+            f"datos_extra del plan carece de campos: {', '.join(faltantes)}"
+        )
+    for campo in (
+        "cuidadores", "equipos", "animales_transportados", "ruta",
+    ):
+        valor = datos[campo]
+        if not isinstance(valor, (list, tuple)):
+            raise ErrorDominio(
+                f"datos_extra[{campo!r}] debe ser una lista o una tupla"
+            )
+
+    try:
+        return PlanEjecucion(
+            tarea_id=datos["tarea_id"],
+            cuidadores=tuple(datos["cuidadores"]),
+            desde=datos["desde"],
+            hasta=datos["hasta"],
+            vehiculo_id=datos["vehiculo_id"],
+            equipos=tuple(datos["equipos"]),
+            animales_transportados=tuple(datos["animales_transportados"]),
+            ruta=tuple(datos["ruta"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ErrorDominio(f"datos_extra no permiten reconstruir el plan: {exc}") from exc
 
 
 # ============================================================================
@@ -195,6 +250,8 @@ def aplicar_evento(mundo: Mundo, evento: Evento) -> Mundo:
         TipoEvento.INCIDENTE_GENERADO: _aplicar_incidente_generado,
         TipoEvento.LECTURA_SENSOR: _aplicar_lectura,
         TipoEvento.TICK_RELOJ: _aplicar_tick_reloj,
+        TipoEvento.PLAN_REGISTRADO: _aplicar_plan_registrado,
+        TipoEvento.PLAN_LIBERADO: _aplicar_plan_liberado,
     }
     aplicador = aplicadores.get(evento.tipo)
     if aplicador is None:
@@ -270,6 +327,32 @@ def _aplicar_incidente_generado(mundo: Mundo, evento: Evento) -> Mundo:
 
 def _aplicar_tick_reloj(mundo: Mundo, evento: Evento) -> Mundo:
     """Aplica TICK_RELOJ (no-op: el reloj se actualiza al momento del evento)."""
+    return mundo
+
+
+def _aplicar_plan_registrado(mundo: Mundo, evento: Evento) -> Mundo:
+    """Reconstruye y registra el plan contenido en el evento."""
+    if evento.entidad_tipo != "PlanEjecucion":
+        raise _evento_no_soportado(evento, TipoEvento.PLAN_REGISTRADO)
+    plan = plan_desde_datos_extra(evento.datos_extra)
+    if plan.tarea_id != evento.entidad_id:
+        raise ErrorDominio(
+            f"El plan de la tarea {plan.tarea_id} no coincide con "
+            f"la entidad del evento {evento.entidad_id}"
+        )
+    if plan.tarea_id in mundo.planes:
+        raise ErrorDominio(f"Ya existe un plan para la tarea {plan.tarea_id}")
+    mundo.registrar_plan(plan)
+    return mundo
+
+
+def _aplicar_plan_liberado(mundo: Mundo, evento: Evento) -> Mundo:
+    """Elimina el plan indicado por el evento."""
+    if evento.entidad_tipo != "PlanEjecucion":
+        raise _evento_no_soportado(evento, TipoEvento.PLAN_LIBERADO)
+    if evento.entidad_id not in mundo.planes:
+        raise ErrorDominio(f"No existe un plan para la tarea {evento.entidad_id}")
+    mundo.eliminar_plan(evento.entidad_id)
     return mundo
 
 
@@ -349,7 +432,8 @@ def verificar_reconstruccion(mundo_vivo: Mundo, mundo_reconstruido: Mundo) -> Li
 
     # Comparar cada colección de entidades
     for attr in ["nodos", "aristas", "recintos", "cuidadores", "vehiculos",
-                 "animales", "equipos", "tareas", "incidentes", "sensores"]:
+                 "animales", "equipos", "tareas", "incidentes", "planes",
+                 "sensores"]:
         vivo = getattr(mundo_vivo, attr)
         recon = getattr(mundo_reconstruido, attr)
 

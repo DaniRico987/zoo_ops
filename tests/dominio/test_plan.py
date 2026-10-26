@@ -12,10 +12,17 @@ from zoo_ops.dominio.enums import (
     Certificacion, EstadoCuidador, EstadoEquipo, EstadoTarea, EstadoVehiculo,
     Habilidad, MedioPermitido, TipoEquipo, TipoNodo, TipoVehiculo,
 )
-from zoo_ops.dominio.errores import PlanInvalido
+from zoo_ops.dominio.errores import (
+    ErrorDominio, EventoDuplicado, PlanInvalido, TiempoRetrocede,
+)
+from zoo_ops.dominio.estados import ejecutar_transicion
+from zoo_ops.dominio.eventos import (
+    Evento, RegistroEventos, TipoEvento, reconstruir_estado,
+    verificar_reconstruccion,
+)
 from zoo_ops.dominio.plan import (
     PlanEjecucion, cubre_requisitos_cuidadores, exigir_plan_valido,
-    validar_plan,
+    liberar_plan_con_evento, registrar_plan_con_evento, validar_plan,
 )
 
 
@@ -588,3 +595,179 @@ class TestValidarPlan:
             "la tarea otra no existe en el mundo" in item
             for item in error.value.errores
         )
+
+
+class TestEventosDePlan:
+    def _registro_con_id_uno(self):
+        registro = RegistroEventos()
+        registro.anexar(Evento(
+            id=1, momento=0, tipo=TipoEvento.TICK_RELOJ,
+            entidad_tipo="Reloj", entidad_id="reloj",
+            estado_antes="", estado_despues="", causa="manual",
+        ))
+        registro.siguiente_id_evento = lambda: 1
+        return registro
+
+    def test_registrar_plan_con_evento_actualiza_mundo_reloj_y_registro(self):
+        mundo = _mundo()
+        plan = _plan()
+        registro = RegistroEventos()
+
+        evento = registrar_plan_con_evento(
+            mundo, registro, plan, tiempo=10, causa="despacho",
+        )
+
+        assert evento.tipo == TipoEvento.PLAN_REGISTRADO
+        assert mundo.planes == {"t1": plan}
+        assert mundo.tiempo_actual == 10
+        assert list(registro) == [evento]
+
+    def test_id_duplicado_no_muta_al_registrar_plan(self):
+        mundo = _mundo()
+        registro = self._registro_con_id_uno()
+        plan = _plan()
+        mundo_antes = copy.deepcopy(mundo)
+        eventos_antes = registro.obtener_todos()
+
+        with pytest.raises(EventoDuplicado):
+            registrar_plan_con_evento(
+                mundo, registro, plan, tiempo=10, causa="duplicado",
+            )
+
+        assert mundo == mundo_antes
+        assert registro.obtener_todos() == eventos_antes
+
+    def test_liberar_plan_con_evento_actualiza_mundo_reloj_y_registro(self):
+        mundo = _mundo()
+        plan = _plan()
+        mundo.registrar_plan(plan)
+        registro = RegistroEventos()
+
+        evento = liberar_plan_con_evento(
+            mundo, registro, "t1", tiempo=10, causa="cancelar despacho",
+        )
+
+        assert evento.tipo == TipoEvento.PLAN_LIBERADO
+        assert mundo.planes == {}
+        assert mundo.tiempo_actual == 10
+        assert list(registro) == [evento]
+
+    def test_no_puede_liberar_plan_de_tarea_activa(self):
+        plan = _plan()
+        tarea = Tarea(
+            id="t1", tipo="traslado", estado=EstadoTarea.ASIGNADA,
+            cuidadores_asignados=plan.cuidadores,
+        )
+        mundo = _mundo(tarea)
+        mundo.registrar_plan(plan)
+        registro = RegistroEventos()
+        antes = copy.deepcopy(mundo)
+
+        with pytest.raises(ErrorDominio, match="tarea activa"):
+            liberar_plan_con_evento(
+                mundo, registro, "t1", tiempo=10, causa="liberar",
+            )
+
+        assert mundo == antes
+        assert len(registro) == 0
+
+    def test_id_duplicado_no_muta_al_liberar_plan(self):
+        mundo = _mundo()
+        mundo.registrar_plan(_plan())
+        registro = self._registro_con_id_uno()
+        mundo_antes = copy.deepcopy(mundo)
+        eventos_antes = registro.obtener_todos()
+
+        with pytest.raises(EventoDuplicado):
+            liberar_plan_con_evento(
+                mundo, registro, "t1", tiempo=10, causa="duplicado",
+            )
+
+        assert mundo == mundo_antes
+        assert registro.obtener_todos() == eventos_antes
+
+    def test_registro_y_asignacion_reconstruyen_el_mundo_vivo(self):
+        inicial = _mundo()
+        mundo = copy.deepcopy(inicial)
+        plan = _plan()
+        registro = RegistroEventos()
+
+        registrar_plan_con_evento(
+            mundo, registro, plan, tiempo=10, causa="registrar",
+        )
+        ejecutar_transicion(
+            mundo, registro, "Tarea", "t1",
+            EstadoTarea.ASIGNADA, 20, "asignar",
+        )
+        ejecutar_transicion(
+            mundo, registro, "Tarea", "t1",
+            EstadoTarea.EN_CURSO, 30, "iniciar",
+        )
+        ejecutar_transicion(
+            mundo, registro, "Tarea", "t1",
+            EstadoTarea.COMPLETADA, 40, "completar",
+        )
+        liberar_plan_con_evento(
+            mundo, registro, "t1", tiempo=50, causa="liberar",
+        )
+
+        reconstruido = reconstruir_estado(registro.obtener_todos(), inicial)
+        assert verificar_reconstruccion(mundo, reconstruido) == []
+
+    def test_fallo_al_anexar_restaura_mundo_y_reloj(self):
+        class RegistroQueFallaAlAnexar(RegistroEventos):
+            def anexar(self, evento):
+                raise RuntimeError("fallo de anexo")
+
+        mundo = _mundo()
+        registro = RegistroQueFallaAlAnexar()
+        antes = copy.deepcopy(mundo)
+        plan = _plan()
+
+        with pytest.raises(RuntimeError, match="fallo de anexo"):
+            registrar_plan_con_evento(
+                mundo, registro, plan, tiempo=10, causa="registrar",
+            )
+
+        assert mundo == antes
+        assert mundo.tiempo_actual == antes.tiempo_actual
+        assert len(registro) == 0
+
+    def test_fallo_al_anexar_liberacion_restaurar_mundo_y_reloj(self):
+        class RegistroQueFallaAlAnexar(RegistroEventos):
+            def anexar(self, evento):
+                raise RuntimeError("fallo de anexo")
+
+        mundo = _mundo()
+        mundo.registrar_plan(_plan())
+        registro = RegistroQueFallaAlAnexar()
+        antes = copy.deepcopy(mundo)
+
+        with pytest.raises(RuntimeError, match="fallo de anexo"):
+            liberar_plan_con_evento(
+                mundo, registro, "t1", tiempo=10, causa="liberar",
+            )
+
+        assert mundo == antes
+        assert mundo.tiempo_actual == antes.tiempo_actual
+        assert len(registro) == 0
+
+    def test_rechaza_tiempo_retrocedido_y_plan_invalido_sin_mutaciones(self):
+        mundo = _mundo()
+        mundo.tiempo_actual = 12
+        registro = RegistroEventos()
+        antes = copy.deepcopy(mundo)
+        plan = _plan(desde=12, hasta=22)
+
+        with pytest.raises(TiempoRetrocede):
+            registrar_plan_con_evento(
+                mundo, registro, plan, tiempo=11, causa="retroceso",
+            )
+        with pytest.raises(PlanInvalido):
+            registrar_plan_con_evento(
+                mundo, registro, _plan(tarea_id="ausente"),
+                tiempo=12, causa="sin tarea",
+            )
+
+        assert mundo == antes
+        assert len(registro) == 0

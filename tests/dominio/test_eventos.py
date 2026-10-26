@@ -16,8 +16,10 @@ from zoo_ops.dominio.enums import EstadoAnimal, EstadoCuidador, EstadoTarea
 from zoo_ops.dominio.errores import ErrorDominio, EventoDuplicado, EventoNoSoportado
 from zoo_ops.dominio.eventos import (
     EVENTOS_NO_RECONSTRUIBLES, Evento, RegistroEventos, TipoEvento,
-    aplicar_evento, crear_evento, reconstruir_estado, verificar_reconstruccion,
+    aplicar_evento, crear_evento, plan_a_datos_extra,
+    plan_desde_datos_extra, reconstruir_estado, verificar_reconstruccion,
 )
+from zoo_ops.dominio.plan import PlanEjecucion
 
 
 def _evento(tipo, entidad_tipo="Cuidador", entidad_id="c1", **kwargs):
@@ -173,6 +175,89 @@ class TestAplicarEvento:
 
         assert resultado is mundo
         assert mundo.cuidadores["c1"].estado == EstadoCuidador.DISPONIBLE
+
+    def test_serializacion_de_plan_es_de_ida_y_vuelta(self):
+        plan = PlanEjecucion(
+            tarea_id="t1", cuidadores=("c1", "c2"),
+            desde=10, hasta=30, vehiculo_id="v1",
+            equipos=("e1", "e2"), animales_transportados=("a1",),
+            ruta=("n1", "n2"),
+        )
+
+        assert plan_desde_datos_extra(plan_a_datos_extra(plan)) == plan
+
+    def test_deserializacion_normaliza_listas_a_tuplas(self):
+        datos = {
+            "tarea_id": "t1",
+            "cuidadores": ["c1"],
+            "desde": 10,
+            "hasta": 30,
+            "vehiculo_id": None,
+            "equipos": ["e1"],
+            "animales_transportados": ["a1"],
+            "ruta": ["n1", "n2"],
+        }
+
+        plan = plan_desde_datos_extra(datos)
+
+        assert plan.cuidadores == ("c1",)
+        assert plan.equipos == ("e1",)
+        assert plan.animales_transportados == ("a1",)
+        assert plan.ruta == ("n1", "n2")
+
+    def test_deserializacion_de_plan_rechaza_campos_faltantes(self):
+        with pytest.raises(ErrorDominio, match="carece de campos"):
+            plan_desde_datos_extra({
+                "tarea_id": "t1",
+                "cuidadores": ("c1",),
+                "desde": 10,
+                "hasta": 30,
+            })
+
+    def test_registrar_plan_y_liberarlo_aplica_eventos(self):
+        plan = PlanEjecucion(
+            tarea_id="t1", cuidadores=("c1",), desde=10, hasta=30,
+        )
+        mundo = Mundo(tareas={"t1": Tarea(id="t1", tipo="test")})
+        registro = RegistroEventos()
+        evento_registro = _evento(
+            TipoEvento.PLAN_REGISTRADO,
+            entidad_tipo="PlanEjecucion",
+            entidad_id="t1",
+            datos_extra=plan_a_datos_extra(plan),
+        )
+
+        aplicar_evento(mundo, evento_registro)
+
+        assert mundo.planes == {"t1": plan}
+
+        evento_liberacion = _evento(
+            TipoEvento.PLAN_LIBERADO,
+            entidad_tipo="PlanEjecucion",
+            entidad_id="t1",
+            id=2,
+        )
+        aplicar_evento(mundo, evento_liberacion)
+
+        assert mundo.planes == {}
+
+    def test_registrar_plan_existente_y_liberar_plan_ausente_fallan(self):
+        plan = PlanEjecucion(
+            tarea_id="t1", cuidadores=("c1",), desde=10, hasta=30,
+        )
+        mundo = Mundo(planes={"t1": plan})
+
+        with pytest.raises(ErrorDominio, match="Ya existe"):
+            aplicar_evento(mundo, _evento(
+                TipoEvento.PLAN_REGISTRADO,
+                entidad_tipo="PlanEjecucion", entidad_id="t1",
+                datos_extra=plan_a_datos_extra(plan),
+            ))
+        with pytest.raises(ErrorDominio, match="No existe"):
+            aplicar_evento(mundo, _evento(
+                TipoEvento.PLAN_LIBERADO,
+                entidad_tipo="PlanEjecucion", entidad_id="ausente",
+            ))
 
     def test_cambio_estado_actualiza_campos_extra(self):
         mundo = Mundo(

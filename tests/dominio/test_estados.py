@@ -21,8 +21,8 @@ from zoo_ops.dominio.enums import (
     TipoVehiculo,
 )
 from zoo_ops.dominio.errores import (
-    DependenciaInexistente, ErrorDominio, EventoDuplicado, TiempoRetrocede,
-    TransicionInvalida,
+    DependenciaInexistente, ErrorDominio, EventoDuplicado, PlanInvalido,
+    TiempoRetrocede, TransicionInvalida,
 )
 from zoo_ops.dominio.estados import (
     TRANSICIONES_ANIMAL, TRANSICIONES_CUIDADOR, TRANSICIONES_INCIDENTE,
@@ -33,6 +33,7 @@ from zoo_ops.dominio.estados import (
 from zoo_ops.dominio.eventos import (
     RegistroEventos, TipoEvento,
 )
+from zoo_ops.dominio.plan import PlanEjecucion
 
 
 # ============================================================================
@@ -480,17 +481,44 @@ class TestTarea:
             cuidadores=cuidadores or {},
         )
 
-    def test_asignada_sin_cuidadores_ids_falla(self):
+    def _registrar_plan(self, mundo, tarea_id, cuidadores):
+        mundo.registrar_plan(PlanEjecucion(
+            tarea_id=tarea_id,
+            cuidadores=tuple(cuidadores),
+            desde=0,
+            hasta=100,
+        ))
+
+    def test_asignada_sin_plan_falla(self):
         tarea = Tarea(id="t2", tipo="test")
         mundo = self._mundo(tarea)
 
-        with pytest.raises(ErrorDominio, match="cuidadores_ids"):
+        with pytest.raises(TransicionInvalida, match="plan registrado"):
             ejecutar_transicion(
                 mundo, RegistroEventos(), "Tarea", "t2",
                 EstadoTarea.ASIGNADA, 10, "asignar",
             )
 
-    def test_asignada_con_lista_vacia_falla_sin_cambios(self):
+    def test_asignada_rechaza_cuidadores_ids_recibidos_por_argumento(self):
+        tarea = Tarea(id="t2", tipo="test")
+        mundo = self._mundo(tarea, {
+            "c1": _cuidador(EstadoCuidador.DISPONIBLE),
+        })
+        self._registrar_plan(mundo, "t2", ("c1",))
+        registro = RegistroEventos()
+        antes = copy.deepcopy(mundo)
+
+        with pytest.raises(ErrorDominio, match="ya no recibe cuidadores_ids"):
+            ejecutar_transicion(
+                mundo, registro, "Tarea", "t2",
+                EstadoTarea.ASIGNADA, 10, "asignar",
+                cuidadores_ids=("c1",),
+            )
+
+        assert mundo == antes
+        assert len(registro) == 0
+
+    def test_plan_sin_cuidadores_falla_sin_cambios(self):
         tarea = Tarea(id="t2", tipo="test")
         mundo = self._mundo(tarea, {
             "c1": _cuidador(EstadoCuidador.DISPONIBLE),
@@ -498,38 +526,33 @@ class TestTarea:
         registro = RegistroEventos()
         antes = copy.deepcopy(mundo)
 
-        with pytest.raises(TransicionInvalida, match="no vacía"):
-            ejecutar_transicion(
-                mundo, registro, "Tarea", "t2",
-                EstadoTarea.ASIGNADA, 10, "asignar",
-                cuidadores_ids=[],
-            )
+        with pytest.raises(PlanInvalido, match="tupla no vacía"):
+            PlanEjecucion(tarea_id="t2", cuidadores=(), desde=0, hasta=100)
 
         assert mundo == antes
         assert len(registro) == 0
 
-    def test_asignada_con_cuidadores_duplicados_falla(self):
+    def test_plan_con_cuidadores_duplicados_falla(self):
         tarea = Tarea(id="t2", tipo="test")
         mundo = self._mundo(tarea, {
             "c1": _cuidador(EstadoCuidador.DISPONIBLE),
         })
 
-        with pytest.raises(TransicionInvalida, match="duplicados"):
-            ejecutar_transicion(
-                mundo, RegistroEventos(), "Tarea", "t2",
-                EstadoTarea.ASIGNADA, 10, "asignar",
-                cuidadores_ids=("c1", "c1"),
+        with pytest.raises(PlanInvalido, match="duplicados"):
+            PlanEjecucion(
+                tarea_id="t2", cuidadores=("c1", "c1"), desde=0, hasta=100,
             )
+        assert "t2" not in mundo.planes
 
     def test_asignada_con_cuidador_inexistente_falla(self):
         tarea = Tarea(id="t2", tipo="test")
         mundo = self._mundo(tarea)
+        self._registrar_plan(mundo, "t2", ("c_inexistente",))
 
         with pytest.raises(TransicionInvalida, match="no existe"):
             ejecutar_transicion(
                 mundo, RegistroEventos(), "Tarea", "t2",
                 EstadoTarea.ASIGNADA, 10, "asignar",
-                cuidadores_ids=("c_inexistente",),
             )
 
     @pytest.mark.parametrize("estado", [
@@ -541,12 +564,12 @@ class TestTarea:
         c1 = _cuidador(estado)
         t2 = Tarea(id="t2", tipo="test")
         mundo = Mundo(cuidadores={"c1": c1}, tareas={"t2": t2})
+        self._registrar_plan(mundo, "t2", ("c1",))
 
         with pytest.raises(TransicionInvalida, match="DISPONIBLE"):
             ejecutar_transicion(
                 mundo, RegistroEventos(), "Tarea", "t2",
                 EstadoTarea.ASIGNADA, 10, "asignar",
-                cuidadores_ids=("c1",),
             )
 
         assert mundo.tareas["t2"].estado == EstadoTarea.PENDIENTE
@@ -560,7 +583,6 @@ class TestTarea:
             ejecutar_transicion(
                 mundo, registro, "Tarea", "t_no_existe",
                 EstadoTarea.ASIGNADA, 10, "asignar",
-                cuidadores_ids=("c1",),
             )
 
         assert len(registro) == 0
@@ -573,12 +595,12 @@ class TestTarea:
         )
         t2 = Tarea(id="t2", tipo="test")
         mundo = Mundo(cuidadores={"c1": c1}, tareas={"t1": t1, "t2": t2})
+        self._registrar_plan(mundo, "t2", ("c1",))
 
         with pytest.raises(TransicionInvalida, match="INV-3"):
             ejecutar_transicion(
                 mundo, RegistroEventos(), "Tarea", "t2",
                 EstadoTarea.ASIGNADA, 10, "asignar",
-                cuidadores_ids=("c1",),
             )
 
     def test_asignada_permite_dos_cuidadores_validos(self):
@@ -588,12 +610,12 @@ class TestTarea:
         }
         t2 = Tarea(id="t2", tipo="test", personas_minimas=2)
         mundo = Mundo(cuidadores=cuidadores, tareas={"t2": t2})
+        self._registrar_plan(mundo, "t2", ("c1", "c2"))
         registro = RegistroEventos()
 
         evento = ejecutar_transicion(
             mundo, registro, "Tarea", "t2",
             EstadoTarea.ASIGNADA, 10, "asignar",
-            cuidadores_ids=["c1", "c2"],
         )
 
         assert evento.datos_extra["cuidadores_ids"] == ("c1", "c2")
@@ -605,12 +627,12 @@ class TestTarea:
         mundo = self._mundo(tarea, {
             "c1": _cuidador(EstadoCuidador.DISPONIBLE),
         })
+        self._registrar_plan(mundo, "t2", ("c1",))
 
         with pytest.raises(TransicionInvalida, match="al menos 2 personas"):
             ejecutar_transicion(
                 mundo, RegistroEventos(), "Tarea", "t2",
                 EstadoTarea.ASIGNADA, 10, "asignar",
-                cuidadores_ids=["c1"],
             )
 
     def test_asignada_con_un_cuidador_ocupado_rechaza_todo_sin_cambios(self):
@@ -626,13 +648,13 @@ class TestTarea:
             tareas={"t1": tarea_activa, "t2": tarea_pendiente},
         )
         registro = RegistroEventos()
+        self._registrar_plan(mundo, "t2", ("c1", "c2"))
         antes = copy.deepcopy(mundo)
 
         with pytest.raises(TransicionInvalida, match="INV-3"):
             ejecutar_transicion(
                 mundo, registro, "Tarea", "t2",
                 EstadoTarea.ASIGNADA, 10, "asignar",
-                cuidadores_ids=("c1", "c2"),
             )
 
         assert mundo == antes
@@ -663,11 +685,11 @@ class TestTarea:
             ),
         }
         mundo = Mundo(cuidadores=cuidadores, tareas={"t2": tarea})
+        self._registrar_plan(mundo, "t2", ("c1", "c2"))
 
         ejecutar_transicion(
             mundo, RegistroEventos(), "Tarea", "t2",
             EstadoTarea.ASIGNADA, 10, "asignar equipo",
-            cuidadores_ids=("c1", "c2"),
         )
 
         assert mundo.tareas["t2"].cuidadores_asignados == ("c1", "c2")
@@ -696,13 +718,13 @@ class TestTarea:
         }
         mundo = Mundo(cuidadores=cuidadores, tareas={"t2": tarea})
         registro = RegistroEventos()
+        self._registrar_plan(mundo, "t2", ("c1", "c2"))
         antes = copy.deepcopy(mundo)
 
         with pytest.raises(TransicionInvalida, match="no cubre"):
             ejecutar_transicion(
                 mundo, registro, "Tarea", "t2",
                 EstadoTarea.ASIGNADA, 10, "asignar equipo incompleto",
-                cuidadores_ids=("c1", "c2"),
             )
 
         assert mundo == antes
@@ -772,12 +794,14 @@ class TestTarea:
         c1 = _cuidador(EstadoCuidador.DISPONIBLE)
         t2 = Tarea(id="t2", tipo="test")
         mundo = Mundo(cuidadores={"c1": c1}, tareas={"t2": t2})
+        self._registrar_plan(mundo, "t2", ("c1",))
 
         assert validar_transicion_tarea_extra(
-            "t2", EstadoTarea.PENDIENTE, EstadoTarea.ASIGNADA, mundo, ("c1",)
+            "t2", EstadoTarea.PENDIENTE, EstadoTarea.ASIGNADA, mundo
         ) is None
         assert "requiere" in validar_transicion_tarea_extra(
-            "t2", EstadoTarea.PENDIENTE, EstadoTarea.ASIGNADA, mundo, ()
+            "t2", EstadoTarea.PENDIENTE, EstadoTarea.ASIGNADA,
+            Mundo(tareas={"t2": t2}),
         )
 
 

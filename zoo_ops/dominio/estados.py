@@ -10,7 +10,7 @@ Las funciones `validar_transicion_*_extra` son validadores de reglas de negocio:
 devuelven un mensaje de error o `None`, y no mutan nada.
 """
 
-from typing import Dict, FrozenSet, List, Optional, Tuple, Union
+from typing import Dict, FrozenSet, Optional, Tuple
 from zoo_ops.dominio.enums import (
     EstadoCuidador, EstadoAnimal, EstadoVehiculo, EstadoTarea, EstadoIncidente,
     Medio, TipoIncidente,
@@ -244,7 +244,6 @@ def validar_transicion_tarea_extra(
     estado_actual: EstadoTarea,
     estado_nuevo: EstadoTarea,
     mundo: Mundo,
-    cuidadores_ids: Optional[Union[List[str], Tuple[str, ...]]] = None,
 ) -> Optional[str]:
     """
     Valida reglas extra para transiciones de Tarea.
@@ -258,23 +257,16 @@ def validar_transicion_tarea_extra(
         return f"Tarea {tarea_id} no existe en el mundo"
 
     if estado_nuevo == EstadoTarea.ASIGNADA:
-        if not isinstance(cuidadores_ids, (list, tuple)) or not cuidadores_ids:
-            return (
-                f"Transición a ASIGNADA requiere una lista o tupla no vacía "
-                f"de cuidadores_ids (tarea {tarea_id})"
-            )
-        if any(not isinstance(cuidador_id, str) or not cuidador_id
-               for cuidador_id in cuidadores_ids):
-            return "Cada valor de cuidadores_ids debe ser un ID no vacío"
-        if len(cuidadores_ids) != len(set(cuidadores_ids)):
-            return "cuidadores_ids no puede contener duplicados"
-        if len(cuidadores_ids) < tarea.personas_minimas:
+        plan = mundo.planes.get(tarea_id)
+        if plan is None:
+            return f"La tarea {tarea_id} requiere un plan registrado para asignarse"
+        if len(plan.cuidadores) < tarea.personas_minimas:
             return (
                 f"Tarea {tarea_id} requiere al menos {tarea.personas_minimas} "
-                f"personas; se recibieron {len(cuidadores_ids)}"
+                f"personas; se recibieron {len(plan.cuidadores)}"
             )
         cuidadores = []
-        for cuidador_id in cuidadores_ids:
+        for cuidador_id in plan.cuidadores:
             cuidador = mundo.cuidadores.get(cuidador_id)
             if cuidador is None:
                 return f"Cuidador {cuidador_id} no existe"
@@ -378,7 +370,6 @@ def validar_transicion_incidente_extra(
 # Parámetros obligatorios para ciertas transiciones.
 _PARAMETROS_REQUERIDOS = {
     ("Animal", EstadoAnimal.EN_RECINTO): ("recinto_destino",),
-    ("Tarea", EstadoTarea.ASIGNADA): ("cuidadores_ids",),
 }
 
 
@@ -416,7 +407,7 @@ def ejecutar_transicion(
         causa: Texto explicativo
         **parametros: Parámetros adicionales según entidad_tipo:
             - Animal: recinto_destino (obligatorio para EN_RECINTO)
-            - Tarea: cuidadores_ids (lista o tupla no vacía para ASIGNADA)
+            - Tarea: el plan debe estar registrado en `mundo.planes`
             - Incidente: sin parámetros; el cierre se calcula desde el mundo
 
     Returns:
@@ -445,6 +436,14 @@ def ejecutar_transicion(
         )
 
     _exigir_parametros(entidad_tipo, estado_nuevo, parametros)
+    if (
+        entidad_tipo == "Tarea"
+        and estado_nuevo == EstadoTarea.ASIGNADA
+        and "cuidadores_ids" in parametros
+    ):
+        raise ErrorDominio(
+            "La asignación ya no recibe cuidadores_ids; registre el plan de ejecución"
+        )
 
     # 2. Obtener tabla de transiciones y validación extra
     tabla, validacion_extra, datos_extra_builder = _obtener_config_entidad(entidad_tipo)
@@ -476,7 +475,10 @@ def ejecutar_transicion(
     # 5. Construir datos_extra para el evento
     datos_extra = {}
     if datos_extra_builder is not None:
-        datos_extra = datos_extra_builder(entidad, estado_nuevo, parametros)
+        if entidad_tipo == "Tarea":
+            datos_extra = datos_extra_builder(entidad, estado_nuevo, parametros, mundo)
+        else:
+            datos_extra = datos_extra_builder(entidad, estado_nuevo, parametros)
 
     # 6. Crear evento
     evento = crear_evento(
@@ -590,7 +592,6 @@ def _construir_args_validacion(
             estado_actual,
             estado_nuevo,
             mundo,
-            parametros.get("cuidadores_ids"),
         )
     if entidad_tipo == "Incidente":
         return (
@@ -609,10 +610,10 @@ def _datos_extra_animal(entidad, estado_nuevo, parametros: dict) -> dict:
     return {}
 
 
-def _datos_extra_tarea(entidad, estado_nuevo, parametros: dict) -> dict:
+def _datos_extra_tarea(entidad, estado_nuevo, parametros: dict, mundo: Mundo) -> dict:
     """Datos que el evento debe escribir en la Tarea."""
     if estado_nuevo == EstadoTarea.ASIGNADA:
-        return {"cuidadores_ids": tuple(parametros["cuidadores_ids"])}
+        return {"cuidadores_ids": tuple(mundo.planes[entidad.id].cuidadores)}
     if estado_nuevo == EstadoTarea.PENDIENTE:
         return {"cuidadores_ids": ()}
     return {}

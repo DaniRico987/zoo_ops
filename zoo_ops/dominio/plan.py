@@ -9,7 +9,11 @@ from zoo_ops.dominio.enums import (
     EstadoCuidador, EstadoEquipo, EstadoTarea, EstadoVehiculo,
     MedioPermitido, TipoVehiculo,
 )
-from zoo_ops.dominio.errores import PlanInvalido
+from zoo_ops.dominio.errores import ErrorDominio, PlanInvalido, TiempoRetrocede
+from zoo_ops.dominio.eventos import (
+    Evento, RegistroEventos, TipoEvento, aplicar_evento, crear_evento,
+    plan_a_datos_extra,
+)
 
 
 @dataclass(frozen=True)
@@ -267,3 +271,88 @@ def exigir_plan_valido(mundo: Mundo, plan: PlanEjecucion) -> None:
     errores = validar_plan(mundo, plan)
     if errores:
         raise PlanInvalido(errores)
+
+
+def registrar_plan_con_evento(
+    mundo: Mundo,
+    registro_eventos: RegistroEventos,
+    plan: PlanEjecucion,
+    tiempo: int,
+    causa: str,
+) -> Evento:
+    """Valida, registra y anexa atómicamente un plan como evento."""
+    exigir_plan_valido(mundo, plan)
+    if tiempo < mundo.tiempo_actual:
+        raise TiempoRetrocede(mundo.tiempo_actual, tiempo)
+
+    evento = crear_evento(
+        registro_eventos,
+        momento=tiempo,
+        tipo=TipoEvento.PLAN_REGISTRADO,
+        entidad_tipo="PlanEjecucion",
+        entidad_id=plan.tarea_id,
+        estado_antes="",
+        estado_despues="",
+        causa=causa,
+        datos_extra=plan_a_datos_extra(plan),
+    )
+    registro_eventos.validar_anexo(evento)
+
+    plan_preexistente = mundo.planes.get(plan.tarea_id)
+    tiempo_antes = mundo.tiempo_actual
+    try:
+        aplicar_evento(mundo, evento)
+        mundo.tiempo_actual = tiempo
+        registro_eventos.anexar(evento)
+    except Exception:
+        if plan_preexistente is None:
+            if plan.tarea_id in mundo.planes:
+                mundo.eliminar_plan(plan.tarea_id)
+        mundo.tiempo_actual = tiempo_antes
+        raise
+    return evento
+
+
+def liberar_plan_con_evento(
+    mundo: Mundo,
+    registro_eventos: RegistroEventos,
+    tarea_id: str,
+    tiempo: int,
+    causa: str,
+) -> Evento:
+    """Libera y anexa atómicamente el plan de una tarea."""
+    if tarea_id not in mundo.planes:
+        raise ErrorDominio(f"No existe un plan para la tarea {tarea_id}")
+    tarea = mundo.tareas.get(tarea_id)
+    if tarea is not None and tarea.estado in {
+        EstadoTarea.ASIGNADA, EstadoTarea.EN_CURSO, EstadoTarea.PAUSADA,
+    }:
+        raise ErrorDominio(
+            f"No se puede liberar el plan de la tarea activa {tarea_id}"
+        )
+    if tiempo < mundo.tiempo_actual:
+        raise TiempoRetrocede(mundo.tiempo_actual, tiempo)
+
+    evento = crear_evento(
+        registro_eventos,
+        momento=tiempo,
+        tipo=TipoEvento.PLAN_LIBERADO,
+        entidad_tipo="PlanEjecucion",
+        entidad_id=tarea_id,
+        estado_antes="",
+        estado_despues="",
+        causa=causa,
+    )
+    registro_eventos.validar_anexo(evento)
+
+    plan_antes = mundo.planes[tarea_id]
+    tiempo_antes = mundo.tiempo_actual
+    try:
+        aplicar_evento(mundo, evento)
+        mundo.tiempo_actual = tiempo
+        registro_eventos.anexar(evento)
+    except Exception:
+        mundo.registrar_plan(plan_antes)
+        mundo.tiempo_actual = tiempo_antes
+        raise
+    return evento
