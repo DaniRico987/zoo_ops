@@ -11,7 +11,10 @@ import copy
 import pytest
 
 from zoo_ops.dominio.catalogos import ESPECIES_CATALOGO, Especie
-from zoo_ops.dominio.entidades import Animal, Cuidador, Incidente, Mundo, Recinto, Tarea, Vehiculo
+from zoo_ops.dominio.entidades import (
+    Animal, Cuidador, HabilidadRequerida, Incidente, Mundo, Recinto, Tarea,
+    Vehiculo,
+)
 from zoo_ops.dominio.enums import (
     Certificacion, EstadoAnimal, EstadoCuidador, EstadoIncidente, EstadoTarea,
     EstadoVehiculo, Habilidad, Medio, Peligrosidad, TipoIncidente, TipoRecinto,
@@ -629,6 +632,76 @@ class TestTarea:
             ejecutar_transicion(
                 mundo, registro, "Tarea", "t2",
                 EstadoTarea.ASIGNADA, 10, "asignar",
+                cuidadores_ids=("c1", "c2"),
+            )
+
+        assert mundo == antes
+        assert len(registro) == 0
+
+    def test_asignada_acepta_cobertura_repartida_entre_cuidadores(self):
+        tarea = Tarea(
+            id="t2",
+            tipo="captura",
+            personas_minimas=2,
+            habilidades_requeridas=(
+                HabilidadRequerida(Habilidad.MANEJO_FELINOS, 4),
+                HabilidadRequerida(Habilidad.MANEJO_AVES, 3),
+            ),
+            certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE}),
+        )
+        cuidadores = {
+            "c1": Cuidador(
+                "c1", "Felinos",
+                habilidades={Habilidad.MANEJO_FELINOS: 4},
+                certificaciones=frozenset({Certificacion.TRANQUILIZANTE}),
+                estado=EstadoCuidador.DISPONIBLE,
+            ),
+            "c2": Cuidador(
+                "c2", "Aves",
+                habilidades={Habilidad.MANEJO_AVES: 3},
+                estado=EstadoCuidador.DISPONIBLE,
+            ),
+        }
+        mundo = Mundo(cuidadores=cuidadores, tareas={"t2": tarea})
+
+        ejecutar_transicion(
+            mundo, RegistroEventos(), "Tarea", "t2",
+            EstadoTarea.ASIGNADA, 10, "asignar equipo",
+            cuidadores_ids=("c1", "c2"),
+        )
+
+        assert mundo.tareas["t2"].cuidadores_asignados == ("c1", "c2")
+
+    def test_asignada_rechaza_equipo_sin_cobertura_y_no_muta(self):
+        tarea = Tarea(
+            id="t2",
+            tipo="captura",
+            personas_minimas=2,
+            habilidades_requeridas=(
+                HabilidadRequerida(Habilidad.MANEJO_FELINOS, 4),
+                HabilidadRequerida(Habilidad.MANEJO_AVES, 3),
+            ),
+            certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE}),
+        )
+        cuidadores = {
+            "c1": Cuidador(
+                "c1", "Felinos",
+                habilidades={Habilidad.MANEJO_FELINOS: 4},
+                estado=EstadoCuidador.DISPONIBLE,
+            ),
+            "c2": Cuidador(
+                "c2", "Sin requisitos",
+                estado=EstadoCuidador.DISPONIBLE,
+            ),
+        }
+        mundo = Mundo(cuidadores=cuidadores, tareas={"t2": tarea})
+        registro = RegistroEventos()
+        antes = copy.deepcopy(mundo)
+
+        with pytest.raises(TransicionInvalida, match="no cubre"):
+            ejecutar_transicion(
+                mundo, registro, "Tarea", "t2",
+                EstadoTarea.ASIGNADA, 10, "asignar equipo incompleto",
                 cuidadores_ids=("c1", "c2"),
             )
 

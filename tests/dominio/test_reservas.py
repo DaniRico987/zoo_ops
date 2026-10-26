@@ -6,20 +6,19 @@ import pytest
 from zoo_ops.dominio.reservas import (
     TipoRecurso, Reserva, RegistroReservas,
     reservar_atomico, liberar_reservas_tarea, verificar_disponibilidad_recurso,
-    crear_reservas_para_tarea, validar_recursos_para_tarea, _orden_determinista_recursos,
-    reservar_para_tarea
+    paquete_de_reservas, reservar_plan, _orden_determinista_recursos,
 )
 from zoo_ops.dominio.entidades import (
-    Cuidador, Vehiculo, Equipo, Tarea, HabilidadRequerida, Mundo,
+    Arista, Cuidador, Vehiculo, Equipo, Tarea, HabilidadRequerida, Mundo, Nodo,
 )
 from zoo_ops.dominio.enums import (
     EstadoCuidador, EstadoEquipo, EstadoVehiculo, TipoVehiculo, TipoEquipo,
-    Habilidad, Certificacion, PrioridadTarea
+    Habilidad, Certificacion, MedioPermitido, TipoNodo,
 )
 from zoo_ops.dominio.errores import (
-    RecursosInvalidos, ReservaAtomicaFallida, ReservaInvalida,
+    PlanInvalido, ReservaAtomicaFallida, ReservaInvalida,
 )
-from zoo_ops.dominio.catalogos import ESPECIES_CATALOGO
+from zoo_ops.dominio.plan import PlanEjecucion, validar_plan
 
 
 class TestReserva:
@@ -299,44 +298,66 @@ class TestRollbackForzado:
         ) is True
 
 
-class TestCrearReservasParaTarea:
-    """Pruebas de helpers para crear reservas desde tareas."""
-    
+def _plan_reserva(
+    tarea_id="t1",
+    cuidadores=("c1",),
+    vehiculo_id=None,
+    equipos=(),
+    desde=100,
+    hasta=200,
+    ruta=(),
+):
+    return PlanEjecucion(
+        tarea_id=tarea_id,
+        cuidadores=cuidadores,
+        vehiculo_id=vehiculo_id,
+        equipos=equipos,
+        desde=desde,
+        hasta=hasta,
+        ruta=ruta,
+    )
+
+
+def _mundo_con_tarea(tarea, **cambios):
+    valores = {"tareas": {tarea.id: tarea}}
+    valores.update(cambios)
+    return Mundo(**valores)
+
+
+class TestPaqueteDeReservas:
+    """Pruebas de construcción del paquete desde un plan."""
+
     def test_crear_reservas_basicas(self):
-        tarea = Tarea(id="t1", tipo="captura", duracion_estimada=3600)
-        
-        reservas = crear_reservas_para_tarea(
-            tarea, cuidador_id="c1", vehiculo_id="v1", equipo_ids=["e1", "e2"],
-            desde=1000, hasta=4600
+        plan = _plan_reserva(
+            vehiculo_id="v1", equipos=("e1", "e2"), desde=1000, hasta=4600,
         )
-        
+
+        reservas = paquete_de_reservas(plan)
+
         assert len(reservas) == 4
-        tipos = {r.recurso_tipo for r in reservas}
+        tipos = {reserva.recurso_tipo for reserva in reservas}
         assert TipoRecurso.CUIDADOR in tipos
         assert TipoRecurso.VEHICULO in tipos
         assert TipoRecurso.EQUIPO in tipos
-        assert sum(1 for r in reservas if r.recurso_tipo == TipoRecurso.EQUIPO) == 2
-    
-    def test_crear_reservas_sin_recursos_opcionales(self):
-        tarea = Tarea(id="t1", tipo="alimentacion")
-        
-        reservas = crear_reservas_para_tarea(tarea, desde=100, hasta=200)
-        
-        assert len(reservas) == 0
-    
-    def test_crear_reservas_intervalo_invalido(self):
-        tarea = Tarea(id="t1", tipo="test")
-        
-        with pytest.raises(ReservaInvalida):
-            crear_reservas_para_tarea(tarea, desde=200, hasta=100)
+        assert sum(
+            1 for reserva in reservas
+            if reserva.recurso_tipo == TipoRecurso.EQUIPO
+        ) == 2
+
+    def test_un_plan_sin_recursos_opcionales_reserva_su_cuidador(self):
+        reservas = paquete_de_reservas(_plan_reserva())
+
+        assert len(reservas) == 1
+        assert reservas[0].recurso_tipo == TipoRecurso.CUIDADOR
+
+    def test_plan_rechaza_intervalo_invalido(self):
+        with pytest.raises(PlanInvalido):
+            _plan_reserva(desde=200, hasta=100)
 
 
-class TestValidarRecursosParaTarea:
-    """Pruebas de validación de recursos para una tarea."""
-    
-    def setup_method(self):
-        self.registro = RegistroReservas()
-    
+class TestValidarPlanDesdeReservas:
+    """Pruebas migradas de validación de recursos al plan de ejecución."""
+
     def test_validar_cuidador_habilidades(self):
         cuidador = Cuidador(
             id="c1", nombre="Test",
@@ -351,8 +372,8 @@ class TestValidarRecursosParaTarea:
             certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE})
         )
         
-        mundo = Mundo(cuidadores={"c1": cuidador})
-        errores = validar_recursos_para_tarea(tarea, mundo, cuidador_id="c1")
+        mundo = _mundo_con_tarea(tarea, cuidadores={"c1": cuidador})
+        errores = validar_plan(mundo, _plan_reserva())
         
         assert len(errores) == 1
         assert "nivel 3 < 4" in errores[0]
@@ -370,8 +391,8 @@ class TestValidarRecursosParaTarea:
             certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE})
         )
         
-        mundo = Mundo(cuidadores={"c1": cuidador})
-        errores = validar_recursos_para_tarea(tarea, mundo, cuidador_id="c1")
+        mundo = _mundo_con_tarea(tarea, cuidadores={"c1": cuidador})
+        errores = validar_plan(mundo, _plan_reserva())
         
         assert any("TRANQUILIZANTE" in e for e in errores)
     
@@ -385,27 +406,28 @@ class TestValidarRecursosParaTarea:
         
         tarea = Tarea(id="t1", tipo="captura")
         
-        mundo = Mundo(cuidadores={"c1": cuidador})
-        errores = validar_recursos_para_tarea(tarea, mundo, cuidador_id="c1")
-        assert any("no está disponible" in e for e in errores)
+        mundo = _mundo_con_tarea(tarea, cuidadores={"c1": cuidador})
+        errores = validar_plan(mundo, _plan_reserva())
+        assert any("no está disponible" in e.lower() for e in errores)
 
     def test_validar_cuidador_en_estado_asignado_no_esta_disponible(self):
         cuidador = Cuidador(
             id="c1", nombre="Test", estado=EstadoCuidador.ASIGNADO,
         )
-        mundo = Mundo(cuidadores={"c1": cuidador})
+        tarea = Tarea(id="t1", tipo="captura")
+        mundo = _mundo_con_tarea(tarea, cuidadores={"c1": cuidador})
 
-        errores = validar_recursos_para_tarea(
-            Tarea(id="t1", tipo="captura"), mundo, cuidador_id="c1",
+        errores = validar_plan(
+            mundo, _plan_reserva(),
         )
 
-        assert any("no está disponible" in error for error in errores)
+        assert any("no está disponible" in error.lower() for error in errores)
 
     def test_validar_recursos_rechaza_diccionarios_en_lugar_de_mundo(self):
         with pytest.raises(TypeError, match="Mundo"):
-            validar_recursos_para_tarea(
-                Tarea(id="t1", tipo="captura"),
-                {"cuidadores": {}, "vehiculos": {}, "equipos": {}},
+            validar_plan(
+                {"cuidadores": {}, "vehiculos": {}, "equipos": {}, "tareas": {}},
+                _plan_reserva(),
             )
     
     def test_validar_vehiculo_certificacion_cuidador(self):
@@ -424,10 +446,10 @@ class TestValidarRecursosParaTarea:
         
         tarea = Tarea(id="t1", tipo="traslado")
         
-        mundo = Mundo(cuidadores={"c1": cuidador}, vehiculos={"v1": vehiculo})
-        errores = validar_recursos_para_tarea(
-            tarea, mundo, cuidador_id="c1", vehiculo_id="v1"
+        mundo = _mundo_con_tarea(
+            tarea, cuidadores={"c1": cuidador}, vehiculos={"v1": vehiculo},
         )
+        errores = validar_plan(mundo, _plan_reserva(vehiculo_id="v1"))
         
         assert any("CAMION_TRASLADO" in e for e in errores)
     
@@ -437,12 +459,23 @@ class TestValidarRecursosParaTarea:
             ubicacion="bodega", estado=EstadoEquipo.EN_USO  # no disponible
         )
         
-        tarea = Tarea(id="t1", tipo="captura", recursos_requeridos=("e1",))
+        tarea = Tarea(
+            id="t1", tipo="captura",
+            equipos_requeridos=(TipoEquipo.DARDOS_TRANQUILIZANTES,),
+        )
         
-        mundo = Mundo(equipos={"e1": equipo})
-        errores = validar_recursos_para_tarea(tarea, mundo, equipo_ids=["e1"])
+        mundo = _mundo_con_tarea(
+            tarea,
+            equipos={"e1": equipo},
+            cuidadores={
+                "c1": Cuidador(
+                    id="c1", nombre="Test", estado=EstadoCuidador.DISPONIBLE,
+                ),
+            },
+        )
+        errores = validar_plan(mundo, _plan_reserva(equipos=("e1",)))
         
-        assert any("no está disponible" in e for e in errores)
+        assert any("no está disponible" in e.lower() for e in errores)
 
 
 class TestLiberarReservasTarea:
@@ -487,147 +520,220 @@ class TestEliminarReserva:
         assert resultado is False
 
 
-class TestReservarParaTarea:
-    """Pruebas de reservar_para_tarea (válida recursos y reserva atómicamente)."""
-    
+class TestReservarPlan:
+    """Pruebas de validación y reserva atómica desde un plan."""
+
     def setup_method(self):
         self.registro = RegistroReservas()
-    
-    def test_reservar_para_tarea_exito(self):
-        cuidador = Cuidador(
-            id="c1", nombre="Test",
-            habilidades={Habilidad.MANEJO_FELINOS: 5},
-            certificaciones=frozenset({Certificacion.TRANQUILIZANTE, Certificacion.CAMION_TRASLADO}),
-            estado=EstadoCuidador.DISPONIBLE
-        )
-        
+
+    def test_reservar_plan_con_tres_cuidadores_camion_y_dardos(self):
+        cuidadores = {
+            "c1": Cuidador(
+                id="c1", nombre="Test",
+                habilidades={Habilidad.MANEJO_FELINOS: 5},
+                certificaciones=frozenset({
+                    Certificacion.TRANQUILIZANTE, Certificacion.CAMION_TRASLADO,
+                }),
+                estado=EstadoCuidador.DISPONIBLE,
+            ),
+            "c2": Cuidador(id="c2", nombre="Test", estado=EstadoCuidador.DISPONIBLE),
+            "c3": Cuidador(id="c3", nombre="Test", estado=EstadoCuidador.DISPONIBLE),
+        }
         vehiculo = Vehiculo(
             id="v1", tipo=TipoVehiculo.CAMION_TRASLADO,
             velocidad=5.0, capacidad_personas=3, capacidad_animales=2,
             certificacion_requerida=Certificacion.CAMION_TRASLADO,
             ubicacion="garaje", estado=EstadoVehiculo.DISPONIBLE
         )
-        
         tarea = Tarea(
-            id="t1", tipo="traslado",
+            id="t1", tipo="traslado", nodo_destino="destino",
             habilidades_requeridas=(HabilidadRequerida(Habilidad.MANEJO_FELINOS, 4),),
             certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE}),
-            recursos_requeridos=("v1", "e1")
+            personas_minimas=3,
+            vehiculo_requerido=TipoVehiculo.CAMION_TRASLADO,
+            equipos_requeridos=(TipoEquipo.DARDOS_TRANQUILIZANTES,),
         )
-        
         equipo = Equipo(
             id="e1", tipo=TipoEquipo.DARDOS_TRANQUILIZANTES,
             ubicacion="bodega", estado=EstadoEquipo.DISPONIBLE
         )
-        mundo = Mundo(
-            cuidadores={"c1": cuidador},
+        mundo = _mundo_con_tarea(
+            tarea,
+            cuidadores=cuidadores,
             vehiculos={"v1": vehiculo},
             equipos={"e1": equipo},
+            nodos={
+                "garaje": Nodo("garaje", TipoNodo.GARAJE, 0, 0),
+                "destino": Nodo("destino", TipoNodo.RECINTO, 1, 1),
+            },
+            aristas={
+                ("garaje", "destino"): Arista(
+                    "garaje", "destino", 10,
+                    frozenset({MedioPermitido.JEEP}),
+                ),
+            },
         )
-        
-        paquete = crear_reservas_para_tarea(
-            tarea, cuidador_id="c1", vehiculo_id="v1", equipo_ids=["e1"],
-            desde=100, hasta=200
+        plan = _plan_reserva(
+            cuidadores=("c1", "c2", "c3"),
+            vehiculo_id="v1",
+            equipos=("e1",),
+            ruta=("garaje", "destino"),
         )
-        reservas = reservar_para_tarea(
-            mundo, self.registro, tarea, paquete
-        )
-        
-        assert len(reservas) == 3
-        assert {r.recurso_tipo for r in reservas} == {
+        reservas = reservar_plan(mundo, self.registro, plan)
+
+        assert len(reservas) == 5
+        assert {reserva.recurso_tipo for reserva in reservas} == {
             TipoRecurso.CUIDADOR, TipoRecurso.VEHICULO, TipoRecurso.EQUIPO,
         }
-        assert self.registro.verificar_disponibilidad(TipoRecurso.CUIDADOR, "c1", 100, 200) is False
-        assert self.registro.verificar_disponibilidad(TipoRecurso.VEHICULO, "v1", 100, 200) is False
-        assert self.registro.verificar_disponibilidad(TipoRecurso.EQUIPO, "e1", 100, 200) is False
-    
-    def test_reservar_para_tarea_rechaza_solapamiento_intra_paquete(self):
+        assert sum(r.recurso_tipo == TipoRecurso.CUIDADOR for r in reservas) == 3
+        for cuidador_id in cuidadores:
+            assert self.registro.verificar_disponibilidad(
+                TipoRecurso.CUIDADOR, cuidador_id, 100, 200
+            ) is False
+        assert self.registro.verificar_disponibilidad(
+            TipoRecurso.VEHICULO, "v1", 100, 200
+        ) is False
+        assert self.registro.verificar_disponibilidad(
+            TipoRecurso.EQUIPO, "e1", 100, 200
+        ) is False
+
+    def test_reservar_plan_rechaza_solapamiento_sin_reservar_parcialmente(self):
         tarea = Tarea(id="t1", tipo="test")
-        paquete = [
-            Reserva(TipoRecurso.EQUIPO, "e1", "t1", 100, 200),
-            Reserva(TipoRecurso.EQUIPO, "e1", "t1", 150, 250),
-        ]
-        
-        equipo = Equipo(
-            id="e1", tipo=TipoEquipo.DARDOS_TRANQUILIZANTES,
-            ubicacion="bodega", estado=EstadoEquipo.DISPONIBLE
+        mundo = _mundo_con_tarea(
+            tarea,
+            cuidadores={
+                "c1": Cuidador(
+                    id="c1", nombre="Test", estado=EstadoCuidador.DISPONIBLE,
+                ),
+            },
+            equipos={
+                "e1": Equipo(
+                    id="e1", tipo=TipoEquipo.DARDOS_TRANQUILIZANTES,
+                    ubicacion="bodega",
+                ),
+            },
         )
-        mundo = Mundo(equipos={"e1": equipo})
-        with pytest.raises(ReservaAtomicaFallida, match="intra-paquete"):
-            reservar_para_tarea(mundo, self.registro, tarea, paquete)
-        
-        assert self.registro.verificar_disponibilidad(TipoRecurso.EQUIPO, "e1", 100, 200) is True
-        assert self.registro.verificar_disponibilidad(TipoRecurso.EQUIPO, "e1", 150, 250) is True
-    
-    def test_reservar_para_tarea_falla_validacion(self):
+        existente = Reserva(TipoRecurso.EQUIPO, "e1", "otra", 100, 200)
+        self.registro.agregar_reserva(existente)
+
+        with pytest.raises(ReservaAtomicaFallida):
+            reservar_plan(
+                mundo, self.registro,
+                _plan_reserva(equipos=("e1",)),
+            )
+
+        assert self.registro.obtener_reservas_de_tarea("t1") == []
+        assert self.registro.obtener_reservas_de_tarea("otra") == [existente]
+        assert self.registro.verificar_disponibilidad(
+            TipoRecurso.CUIDADOR, "c1", 100, 200
+        ) is True
+
+    def test_reservar_plan_falla_validacion_sin_reservar(self):
         cuidador = Cuidador(
             id="c1", nombre="Test",
             habilidades={Habilidad.MANEJO_FELINOS: 3},  # nivel insuficiente
             certificaciones=frozenset({Certificacion.TRANQUILIZANTE}),
             estado=EstadoCuidador.DISPONIBLE
         )
-        
         tarea = Tarea(
             id="t1", tipo="traslado",
             habilidades_requeridas=(HabilidadRequerida(Habilidad.MANEJO_FELINOS, 4),),
             certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE})
         )
-        
-        mundo = Mundo(cuidadores={"c1": cuidador})
-        paquete = crear_reservas_para_tarea(
-            tarea, cuidador_id="c1", desde=100, hasta=200
-        )
-        with pytest.raises(RecursosInvalidos) as exc:
-            reservar_para_tarea(mundo, self.registro, tarea, paquete)
-        
+        mundo = _mundo_con_tarea(tarea, cuidadores={"c1": cuidador})
+        with pytest.raises(PlanInvalido) as exc:
+            reservar_plan(mundo, self.registro, _plan_reserva())
+
         assert "nivel 3 < 4" in str(exc.value)
-        # No debe haber reservas creadas
         assert self.registro.verificar_disponibilidad(TipoRecurso.CUIDADOR, "c1", 100, 200) is True
-    
-    def test_reservar_para_tarea_rechaza_paquete_vacio_con_recursos(self):
+
+    def test_reservar_plan_falla_si_falta_vehiculo_requerido(self):
         tarea = Tarea(
-            id="t1", tipo="test", recursos_requeridos=("v1",),
+            id="t1", tipo="test", vehiculo_requerido=TipoVehiculo.JEEP,
         )
 
-        with pytest.raises(RecursosInvalidos, match="vacío"):
-            reservar_para_tarea(Mundo(), self.registro, tarea, [])
+        with pytest.raises(PlanInvalido, match="requiere vehículo"):
+            reservar_plan(
+                _mundo_con_tarea(tarea, cuidadores={
+                    "c1": Cuidador(
+                        id="c1", nombre="Test",
+                        estado=EstadoCuidador.DISPONIBLE,
+                    ),
+                }),
+                self.registro, _plan_reserva(),
+            )
 
         assert self.registro.obtener_reservas_de_tarea("t1") == []
 
-    def test_reservar_para_tarea_rechaza_paquete_vacio_con_certificaciones(self):
+    def test_reservar_plan_falla_si_el_equipo_no_cubre_certificacion(self):
         tarea = Tarea(
             id="t1", tipo="test",
             certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE}),
         )
+        mundo = _mundo_con_tarea(tarea, cuidadores={
+            "c1": Cuidador(
+                id="c1", nombre="Test", estado=EstadoCuidador.DISPONIBLE,
+            ),
+        })
 
-        with pytest.raises(RecursosInvalidos, match="vacío"):
-            reservar_para_tarea(Mundo(), self.registro, tarea, [])
+        with pytest.raises(PlanInvalido, match="TRANQUILIZANTE"):
+            reservar_plan(mundo, self.registro, _plan_reserva())
 
         assert self.registro.obtener_reservas_de_tarea("t1") == []
 
-    def test_reservar_para_tarea_paquete_vacio_sin_requisitos_es_noop(self):
+    def test_reservar_plan_siempre_reserva_al_menos_un_cuidador(self):
         tarea = Tarea(id="t1", tipo="alimentacion")
+        mundo = _mundo_con_tarea(tarea, cuidadores={
+            "c1": Cuidador(
+                id="c1", nombre="Test", estado=EstadoCuidador.DISPONIBLE,
+            ),
+        })
 
-        resultado = reservar_para_tarea(Mundo(), self.registro, tarea, [])
+        resultado = reservar_plan(mundo, self.registro, _plan_reserva())
 
-        assert resultado == []
-        assert self.registro.obtener_reservas_de_tarea("t1") == []
+        assert len(resultado) == 1
+        assert resultado[0].recurso_tipo == TipoRecurso.CUIDADOR
+        assert self.registro.obtener_reservas_de_tarea("t1") == resultado
 
-    def test_reservar_para_tarea_rechaza_paquete_de_otra_tarea(self):
+    def test_reservar_plan_rechaza_plan_de_otra_tarea(self):
         tarea = Tarea(id="t1", tipo="test")
-        paquete = [Reserva(TipoRecurso.CUIDADOR, "c1", "t2", 100, 200)]
-        
-        with pytest.raises(RecursosInvalidos, match="no pertenece"):
-            reservar_para_tarea(Mundo(), self.registro, tarea, paquete)
-        
+        mundo = _mundo_con_tarea(tarea, cuidadores={
+            "c1": Cuidador(
+                id="c1", nombre="Test", estado=EstadoCuidador.DISPONIBLE,
+            ),
+        })
+
+        with pytest.raises(PlanInvalido, match="no existe en el mundo"):
+            reservar_plan(
+                mundo, self.registro,
+                _plan_reserva(tarea_id="t2"),
+            )
+
         assert self.registro.verificar_disponibilidad(TipoRecurso.CUIDADOR, "c1", 100, 200) is True
-    
-    def test_reservar_para_tarea_rechaza_varios_cuidadores(self):
+
+    def test_reservar_plan_admite_varios_cuidadores(self):
         tarea = Tarea(id="t1", tipo="test")
-        paquete = [
-            Reserva(TipoRecurso.CUIDADOR, "c1", "t1", 100, 200),
-            Reserva(TipoRecurso.CUIDADOR, "c2", "t1", 100, 200),
-        ]
-        
-        with pytest.raises(RecursosInvalidos, match="un solo cuidador"):
-            reservar_para_tarea(Mundo(), self.registro, tarea, paquete)
+        mundo = _mundo_con_tarea(tarea, cuidadores={
+            cuidador_id: Cuidador(
+                id=cuidador_id, nombre=cuidador_id,
+                estado=EstadoCuidador.DISPONIBLE,
+            )
+            for cuidador_id in ("c1", "c2")
+        })
+
+        resultado = reservar_plan(
+            mundo, self.registro,
+            _plan_reserva(cuidadores=("c1", "c2")),
+        )
+
+        assert len(resultado) == 2
+        for cuidador_id in ("c1", "c2"):
+            assert self.registro.verificar_disponibilidad(
+                TipoRecurso.CUIDADOR, cuidador_id, 100, 200
+            ) is False
+
+    def test_plan_con_cuidadores_duplicados_no_reserva(self):
+        with pytest.raises(PlanInvalido, match="duplicados"):
+            _plan_reserva(cuidadores=("c1", "c1"))
+
+        assert self.registro.obtener_reservas_de_tarea("t1") == []

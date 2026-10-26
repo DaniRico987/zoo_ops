@@ -5,7 +5,7 @@ Mundo es un agregado mutable que centraliza las mutaciones de sus colecciones.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union, TYPE_CHECKING
 from zoo_ops.dominio.enums import (
     TipoNodo, TipoRecinto, Medio, Peligrosidad, TipoVehiculo, TipoEquipo,
     Habilidad, Certificacion, EstadoCuidador, EstadoAnimal, EstadoVehiculo,
@@ -15,6 +15,9 @@ from zoo_ops.dominio.enums import (
 )
 from zoo_ops.dominio.catalogos import Especie
 from zoo_ops.dominio.errores import ErrorDominio
+
+if TYPE_CHECKING:
+    from zoo_ops.dominio.plan import PlanEjecucion
 
 
 # ============================================================================
@@ -150,7 +153,8 @@ class Tarea:
     duracion_estimada: int = 0  # segundos simulados
     habilidades_requeridas: Tuple[HabilidadRequerida, ...] = field(default_factory=tuple)
     certificaciones_requeridas: frozenset[Certificacion] = field(default_factory=frozenset)
-    recursos_requeridos: Tuple[str, ...] = field(default_factory=tuple)  # ids de equipo/vehiculo
+    vehiculo_requerido: Optional[TipoVehiculo] = None
+    equipos_requeridos: Tuple[TipoEquipo, ...] = field(default_factory=tuple)
     ventana_tiempo: Optional[Tuple[int, int]] = None  # (inicio, fin) opcional
     dependencias: frozenset[str] = field(default_factory=frozenset)  # ids de tareas
     interrumpible: bool = True
@@ -222,6 +226,7 @@ class Mundo:
     equipos: Dict[str, Equipo] = field(default_factory=dict)
     tareas: Dict[str, Tarea] = field(default_factory=dict)
     incidentes: Dict[str, Incidente] = field(default_factory=dict)
+    planes: Dict[str, "PlanEjecucion"] = field(default_factory=dict)
     sensores: Dict[str, Sensor] = field(default_factory=dict)
     lecturas: List[Lectura] = field(default_factory=list)
     tiempo_actual: int = 0  # reloj simulado en segundos
@@ -256,6 +261,14 @@ class Mundo:
         if not hasattr(self, coleccion):
             raise ValueError(f"Colección desconocida: {coleccion}")
         return getattr(self, coleccion).get(entidad_id)
+
+    def registrar_plan(self, plan: "PlanEjecucion") -> None:
+        """Registra un plan de ejecución para su tarea."""
+        self.agregar_entidad("planes", plan.tarea_id, plan)
+
+    def eliminar_plan(self, tarea_id: str) -> None:
+        """Elimina el plan asociado a una tarea."""
+        self.eliminar_entidad("planes", tarea_id)
 
 
 # ============================================================================

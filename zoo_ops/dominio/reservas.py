@@ -6,13 +6,11 @@ Orden determinista para evitar deadlocks.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Tuple, Optional, FrozenSet
+from typing import Dict, List, Tuple, Optional
 from enum import Enum, auto
-from zoo_ops.dominio.errores import (
-    RecursosInvalidos, ReservaAtomicaFallida, ReservaInvalida,
-)
-from zoo_ops.dominio.entidades import Cuidador, Vehiculo, Equipo, Tarea, Mundo
-from zoo_ops.dominio.enums import EstadoCuidador, EstadoEquipo, EstadoVehiculo
+from zoo_ops.dominio.errores import ReservaAtomicaFallida, ReservaInvalida
+from zoo_ops.dominio.entidades import Mundo
+from zoo_ops.dominio.plan import PlanEjecucion, exigir_plan_valido
 
 
 # ============================================================================
@@ -258,215 +256,34 @@ def verificar_disponibilidad_recurso(
 
 
 # ============================================================================
-# Helpers para crear reservas desde tareas
+# Reservas construidas a partir de un plan validado
 # ============================================================================
 
-def crear_reservas_para_tarea(
-    tarea: Tarea,
-    desde: int,
-    hasta: int,
-    cuidador_id: Optional[str] = None,
-    vehiculo_id: Optional[str] = None,
-    equipo_ids: Optional[List[str]] = None
-) -> List[Reserva]:
-    """
-    Crea las reservas necesarias para una tarea.
-    
-    Args:
-        tarea: Tarea para la que crear reservas
-        desde: Inicio de la reserva (obligatorio)
-        hasta: Fin de la reserva (exclusive) (obligatorio)
-        cuidador_id: ID del cuidador asignado (opcional)
-        vehiculo_id: ID del vehículo asignado (opcional)
-        equipo_ids: Lista de IDs de equipos necesarios (opcional)
-    
-    Returns:
-        Lista de reservas (no las crea en el registro, solo las construye)
-    """
-    if desde >= hasta:
-        raise ReservaInvalida(
-            recurso="intervalo",
-            desde=desde,
-            hasta=hasta,
-            mensaje="desde debe ser < hasta"
+def paquete_de_reservas(plan: PlanEjecucion) -> List[Reserva]:
+    """Construye una reserva por cada recurso del plan y su intervalo."""
+    reservas = [
+        Reserva(TipoRecurso.CUIDADOR, cuidador_id, plan.tarea_id, plan.desde, plan.hasta)
+        for cuidador_id in plan.cuidadores
+    ]
+    if plan.vehiculo_id is not None:
+        reservas.append(
+            Reserva(
+                TipoRecurso.VEHICULO, plan.vehiculo_id, plan.tarea_id,
+                plan.desde, plan.hasta,
+            )
         )
-    
-    reservas = []
-    
-    if cuidador_id:
-        reservas.append(Reserva(
-            recurso_tipo=TipoRecurso.CUIDADOR,
-            recurso_id=cuidador_id,
-            tarea_id=tarea.id,
-            desde=desde,
-            hasta=hasta
-        ))
-    
-    if vehiculo_id:
-        reservas.append(Reserva(
-            recurso_tipo=TipoRecurso.VEHICULO,
-            recurso_id=vehiculo_id,
-            tarea_id=tarea.id,
-            desde=desde,
-            hasta=hasta
-        ))
-    
-    if equipo_ids:
-        for equipo_id in equipo_ids:
-            reservas.append(Reserva(
-                recurso_tipo=TipoRecurso.EQUIPO,
-                recurso_id=equipo_id,
-                tarea_id=tarea.id,
-                desde=desde,
-                hasta=hasta
-            ))
-    
+    reservas.extend(
+        Reserva(TipoRecurso.EQUIPO, equipo_id, plan.tarea_id, plan.desde, plan.hasta)
+        for equipo_id in plan.equipos
+    )
     return reservas
 
 
-def reservar_para_tarea(
-    mundo,  # Mundo con acceso de solo lectura a entidades
-    registro: RegistroReservas,
-    tarea: Tarea,
-    paquete: List[Reserva],
-) -> List[Reserva]:
-    """
-    Reserva un paquete de recursos para una tarea: valida los recursos implicados
-    y reserva el paquete de forma atómica.
-
-    Es la única vía pública para reservar en nombre de una tarea. El paquete se
-    construye con `crear_reservas_para_tarea` (o a mano), y esta función extrae de
-    él los IDs por `TipoRecurso` para validarlos contra la tarea y el mundo.
-
-    Args:
-        mundo: Estado del mundo (para validar recursos)
-        registro: Registro de reservas
-        tarea: Tarea para la que reservar
-        paquete: Reservas a crear (todas deben pertenecer a `tarea.id`)
-
-    Returns:
-        Lista de reservas creadas (en orden determinista)
-
-    Raises:
-        RecursosInvalidos: Si el paquete no es coherente, está vacío teniendo la
-            tarea requisitos, o los recursos no cumplen los requisitos
-        ReservaAtomicaFallida: Si no se pueden reservar todos los recursos
-    """
-    if not paquete:
-        if tarea.recursos_requeridos or tarea.certificaciones_requeridas:
-            raise RecursosInvalidos([
-                f"Paquete vacío para la tarea {tarea.id}, que declara recursos "
-                "o certificaciones requeridas"
-            ])
-        return []
-
-    ajenas = [r for r in paquete if r.tarea_id != tarea.id]
-    if ajenas:
-        raise RecursosInvalidos([
-            f"Reserva de la tarea {r.tarea_id} no pertenece a la tarea {tarea.id}"
-            for r in ajenas
-        ])
-
-    ids_cuidador = [
-        r.recurso_id for r in paquete if r.recurso_tipo == TipoRecurso.CUIDADOR
-    ]
-    ids_vehiculo = [
-        r.recurso_id for r in paquete if r.recurso_tipo == TipoRecurso.VEHICULO
-    ]
-    ids_equipo = [
-        r.recurso_id for r in paquete if r.recurso_tipo == TipoRecurso.EQUIPO
-    ]
-
-    errores = []
-    if len(ids_cuidador) > 1:
-        errores.append(
-            f"Una tarea admite un solo cuidador; se recibieron {sorted(ids_cuidador)}"
-        )
-    if len(ids_vehiculo) > 1:
-        errores.append(
-            f"Una tarea admite un solo vehículo; se recibieron {sorted(ids_vehiculo)}"
-        )
-    if errores:
-        raise RecursosInvalidos(errores)
-
-    errores = validar_recursos_para_tarea(
-        tarea,
-        mundo,
-        cuidador_id=ids_cuidador[0] if ids_cuidador else None,
-        vehiculo_id=ids_vehiculo[0] if ids_vehiculo else None,
-        equipo_ids=ids_equipo or None,
-    )
-    if errores:
-        raise RecursosInvalidos(errores)
-
-    return reservar_atomico(registro, paquete)
-
-
-def validar_recursos_para_tarea(
-    tarea: Tarea,
+def reservar_plan(
     mundo: Mundo,
-    cuidador_id: Optional[str] = None,
-    vehiculo_id: Optional[str] = None,
-    equipo_ids: Optional[List[str]] = None
-) -> List[str]:
-    """
-    Valida que los recursos propuestos cumplen requisitos de la tarea.
-    Retorna lista de errores (vacía si todo OK).
-    """
-    if not isinstance(mundo, Mundo):
-        raise TypeError("mundo debe ser una instancia de Mundo")
-
-    errores = []
-    
-    # Validar cuidador
-    if cuidador_id:
-        cuidador = mundo.cuidadores.get(cuidador_id)
-        if not cuidador:
-            errores.append(f"Cuidador {cuidador_id} no existe")
-        else:
-            # Verificar habilidades
-            for hab_req in tarea.habilidades_requeridas:
-                nivel = cuidador.habilidades.get(hab_req.habilidad, 0)
-                if nivel < hab_req.nivel_minimo:
-                    errores.append(
-                        f"Cuidador {cuidador_id}: {hab_req.habilidad.name} nivel {nivel} < {hab_req.nivel_minimo}"
-                    )
-            # Verificar certificaciones
-            for cert in tarea.certificaciones_requeridas:
-                if cert not in cuidador.certificaciones:
-                    errores.append(f"Cuidador {cuidador_id} falta certificación {cert.name}")
-            # Verificar estado
-            if cuidador.estado != EstadoCuidador.DISPONIBLE:
-                errores.append(f"Cuidador {cuidador_id} no está disponible (estado: {cuidador.estado.name})")
-    
-    # Validar vehículo
-    if vehiculo_id:
-        vehiculo = mundo.vehiculos.get(vehiculo_id)
-        if not vehiculo:
-            errores.append(f"Vehículo {vehiculo_id} no existe")
-        else:
-            # Verificar certificación del cuidador para este vehículo
-            if cuidador_id:
-                cuidador = mundo.cuidadores.get(cuidador_id)
-                if cuidador and vehiculo.certificacion_requerida not in cuidador.certificaciones:
-                    errores.append(
-                        f"Cuidador {cuidador_id} no tiene certificación {vehiculo.certificacion_requerida.name} "
-                        f"para vehículo {vehiculo_id}"
-                    )
-            # Verificar estado
-            if vehiculo.estado != EstadoVehiculo.DISPONIBLE:
-                errores.append(f"Vehículo {vehiculo_id} no está disponible (estado: {vehiculo.estado.name})")
-    
-    # Validar equipos
-    if equipo_ids:
-        for equipo_id in equipo_ids:
-            equipo = mundo.equipos.get(equipo_id)
-            if not equipo:
-                errores.append(f"Equipo {equipo_id} no existe")
-            elif equipo.estado != EstadoEquipo.DISPONIBLE:
-                errores.append(
-                    f"Equipo {equipo_id} no está disponible "
-                    f"(estado: {equipo.estado.name})"
-                )
-    
-    return errores
+    registro: RegistroReservas,
+    plan: PlanEjecucion,
+) -> List[Reserva]:
+    """Valida y reserva atómicamente todos los recursos definidos en un plan."""
+    exigir_plan_valido(mundo, plan)
+    return reservar_atomico(registro, paquete_de_reservas(plan))

@@ -16,6 +16,7 @@ from zoo_ops.dominio.enums import (
     PrioridadTarea
 )
 from zoo_ops.dominio.catalogos import ESPECIES_CATALOGO
+from zoo_ops.dominio.plan import PlanEjecucion
 from zoo_ops.dominio.errores import ErrorDominio
 
 
@@ -178,6 +179,8 @@ class TestTarea:
         assert t.estado == EstadoTarea.PENDIENTE
         assert t.interrumpible is True
         assert t.personas_minimas == 1
+        assert t.vehiculo_requerido is None
+        assert t.equipos_requeridos == ()
 
     def test_personas_minimas_menor_que_uno_lanza_error_de_dominio(self):
         with pytest.raises(ErrorDominio, match="personas_minimas"):
@@ -191,7 +194,8 @@ class TestTarea:
                 HabilidadRequerida(Habilidad.CONDUCCION, 3),
             ),
             certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE, Certificacion.JEEP}),
-            recursos_requeridos=("e1", "v1"),
+            vehiculo_requerido=TipoVehiculo.JEEP,
+            equipos_requeridos=(TipoEquipo.DARDOS_TRANQUILIZANTES,),
             ventana_tiempo=(1000, 5000),
             dependencias=frozenset({"t0"}),
             interrumpible=False
@@ -200,7 +204,8 @@ class TestTarea:
         assert t.habilidades_requeridas[0].habilidad == Habilidad.MANEJO_FELINOS
         assert t.habilidades_requeridas[0].nivel_minimo == 4
         assert Certificacion.TRANQUILIZANTE in t.certificaciones_requeridas
-        assert "e1" in t.recursos_requeridos
+        assert t.vehiculo_requerido == TipoVehiculo.JEEP
+        assert t.equipos_requeridos == (TipoEquipo.DARDOS_TRANQUILIZANTES,)
         assert t.ventana_tiempo == (1000, 5000)
         assert "t0" in t.dependencias
         assert t.interrumpible is False
@@ -259,6 +264,20 @@ class TestMundo:
         assert m.nodos["n1"] == n
         assert m.cuidadores["c1"] == c
         assert m.tiempo_actual == 100
+
+    def test_registrar_y_eliminar_plan(self):
+        mundo = Mundo()
+        plan = PlanEjecucion(
+            tarea_id="t1", cuidadores=("c1",), desde=10, hasta=20,
+        )
+
+        mundo.registrar_plan(plan)
+
+        assert mundo.planes == {"t1": plan}
+
+        mundo.eliminar_plan("t1")
+
+        assert mundo.planes == {}
 
 
 class TestUtilidadesUbicacion:

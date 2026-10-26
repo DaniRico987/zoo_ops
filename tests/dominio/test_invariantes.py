@@ -10,11 +10,12 @@ from zoo_ops.dominio.invariantes import (
     _verificar_invariante_1_habilidades_cuidador,
     _verificar_invariante_2_solapamiento_reservas,
     _verificar_invariante_3_una_tarea_activa,
+    _verificar_invariante_4_capacidad_vehiculo,
+    _verificar_invariante_5_ruta_jeep,
+    _verificar_invariante_9_planes_consistentes,
     _verificar_invariante_6_animal_en_recinto_valido,
     _verificar_invariante_8_dependencias_tarea,
     verificar_invariante_eventos,
-    _no_verificada_invariante_4,
-    _no_verificada_invariante_5,
     formatear_violaciones, formatear_no_verificadas, assert_sin_violaciones
 )
 from zoo_ops.dominio.entidades import (
@@ -30,6 +31,7 @@ from zoo_ops.dominio.catalogos import ESPECIES_CATALOGO
 from zoo_ops.dominio.reservas import RegistroReservas, Reserva, TipoRecurso, reservar_atomico
 from zoo_ops.dominio.eventos import RegistroEventos, crear_evento, TipoEvento
 from zoo_ops.dominio.estados import ejecutar_transicion
+from zoo_ops.dominio.plan import PlanEjecucion
 
 
 class TestInvariante1HabilidadesCuidador:
@@ -101,14 +103,40 @@ class TestInvariante1HabilidadesCuidador:
         assert len(violaciones) == 1
         assert "TRANQUILIZANTE" in violaciones[0].detalle
 
-    def test_revisa_habilidades_de_cada_cuidador_asignado(self):
+    def test_equipo_cubre_requisitos_repartidos_entre_cuidadores(self):
         cuidador_valido = Cuidador(
             id="c1", nombre="Válido",
             habilidades={Habilidad.MANEJO_FELINOS: 4},
+            certificaciones=frozenset({Certificacion.TRANQUILIZANTE}),
             estado=EstadoCuidador.EJECUTANDO,
         )
-        cuidador_sin_habilidad = Cuidador(
-            id="c2", nombre="Sin habilidad",
+        cuidador_aves = Cuidador(
+            id="c2", nombre="Aves",
+            habilidades={Habilidad.MANEJO_AVES: 3},
+            estado=EstadoCuidador.EJECUTANDO,
+        )
+        tarea = Tarea(
+            id="t1", tipo="captura",
+            habilidades_requeridas=(
+                HabilidadRequerida(Habilidad.MANEJO_FELINOS, 4),
+                HabilidadRequerida(Habilidad.MANEJO_AVES, 3),
+            ),
+            certificaciones_requeridas=frozenset({Certificacion.TRANQUILIZANTE}),
+            estado=EstadoTarea.EN_CURSO,
+            cuidadores_asignados=("c1", "c2"),
+        )
+        mundo = Mundo(
+            cuidadores={"c1": cuidador_valido, "c2": cuidador_aves},
+            tareas={"t1": tarea},
+        )
+
+        violaciones = _verificar_invariante_1_habilidades_cuidador(mundo)
+
+        assert violaciones == []
+
+    def test_equipo_que_no_cubre_requisito_produce_violacion(self):
+        cuidador = Cuidador(
+            id="c1", nombre="Sin habilidad",
             estado=EstadoCuidador.EJECUTANDO,
         )
         tarea = Tarea(
@@ -117,17 +145,16 @@ class TestInvariante1HabilidadesCuidador:
                 HabilidadRequerida(Habilidad.MANEJO_FELINOS, 4),
             ),
             estado=EstadoTarea.EN_CURSO,
-            cuidadores_asignados=("c1", "c2"),
-        )
-        mundo = Mundo(
-            cuidadores={"c1": cuidador_valido, "c2": cuidador_sin_habilidad},
-            tareas={"t1": tarea},
+            cuidadores_asignados=("c1",),
         )
 
-        violaciones = _verificar_invariante_1_habilidades_cuidador(mundo)
+        violaciones = _verificar_invariante_1_habilidades_cuidador(
+            Mundo(cuidadores={"c1": cuidador}, tareas={"t1": tarea})
+        )
 
         assert len(violaciones) == 1
-        assert violaciones[0].entidad_id == "c2"
+        assert violaciones[0].entidad_id == "t1"
+        assert "MANEJO_FELINOS" in violaciones[0].detalle
     
     def test_solo_tareas_activas(self):
         """Solo verifica tareas en ASIGNADA, EN_CURSO, PAUSADA."""
@@ -161,7 +188,7 @@ class TestInvariante1HabilidadesCuidador:
         violaciones = _verificar_invariante_1_habilidades_cuidador(mundo)
         # Solo debe fallar t2
         assert len(violaciones) == 1
-        assert violaciones[0].entidad_id == "c1"
+        assert violaciones[0].entidad_id == "t2"
 
 
 class TestInvariante2SolapamientoReservas:
@@ -242,30 +269,248 @@ class TestInvariante3UnaTareaActiva:
         assert violaciones[0].entidad_id == "c1"
 
 
-class TestInvariante4NoVerificada:
-    """Pruebas de que INV-4 aparece en no_verificadas."""
-    
-    def test_invariante_4_en_no_verificadas(self):
-        registro = RegistroReservas()
-        mundo = Mundo()
-        violaciones, no_verificadas = verificar_invariantes(mundo, registro)
-        
-        inv4 = [nv for nv in no_verificadas if nv.invariante == "INV-4-capacidad-vehiculo"]
-        assert len(inv4) == 1
-        assert "motor de asignación" in inv4[0].motivo
+class TestInvariante4CapacidadVehiculoPlan:
+    """INV-4 verifica capacidades a partir del plan de ejecución."""
+
+    def test_plan_que_excede_capacidad_produce_violaciones(self):
+        tarea = Tarea(
+            id="t1", tipo="traslado", estado=EstadoTarea.ASIGNADA,
+            cuidadores_asignados=("c1", "c2", "c3"),
+        )
+        plan = PlanEjecucion(
+            tarea_id="t1",
+            cuidadores=("c1", "c2", "c3"),
+            vehiculo_id="v1",
+            animales_transportados=("a1", "a2"),
+            desde=10,
+            hasta=20,
+        )
+        vehiculo = Vehiculo(
+            id="v1", tipo=TipoVehiculo.CAMION_TRASLADO, velocidad=5,
+            capacidad_personas=2, capacidad_animales=1,
+            certificacion_requerida=Certificacion.CAMION_TRASLADO,
+            ubicacion="garaje",
+        )
+        cuidadores = {
+            cid: Cuidador(
+                id=cid, nombre=cid, estado=EstadoCuidador.EJECUTANDO,
+            )
+            for cid in ("c1", "c2", "c3")
+        }
+
+        violaciones = _verificar_invariante_4_capacidad_vehiculo(
+            Mundo(
+                tareas={"t1": tarea}, planes={"t1": plan},
+                vehiculos={"v1": vehiculo}, cuidadores=cuidadores,
+            )
+        )
+
+        assert len(violaciones) == 2
+        assert all(item.invariante == "INV-4-capacidad-vehiculo" for item in violaciones)
+
+    def test_plan_dentro_de_capacidad_no_viola(self):
+        tarea = Tarea(
+            id="t1", tipo="traslado", estado=EstadoTarea.ASIGNADA,
+            cuidadores_asignados=("c1", "c2"),
+        )
+        plan = PlanEjecucion(
+            tarea_id="t1", cuidadores=("c1", "c2"), vehiculo_id="v1",
+            animales_transportados=("a1",), desde=10, hasta=20,
+        )
+        vehiculo = Vehiculo(
+            id="v1", tipo=TipoVehiculo.CAMION_TRASLADO, velocidad=5,
+            capacidad_personas=2, capacidad_animales=1,
+            certificacion_requerida=Certificacion.CAMION_TRASLADO,
+            ubicacion="garaje",
+        )
+
+        assert _verificar_invariante_4_capacidad_vehiculo(
+            Mundo(tareas={"t1": tarea}, planes={"t1": plan}, vehiculos={"v1": vehiculo})
+        ) == []
+
+    def test_plan_con_vehiculo_inexistente_produce_violacion(self):
+        tarea = Tarea(
+            id="t1", tipo="traslado", estado=EstadoTarea.ASIGNADA,
+        )
+        plan = PlanEjecucion(
+            tarea_id="t1", cuidadores=("c1",), vehiculo_id="v-missing",
+            desde=10, hasta=20,
+        )
+
+        violaciones = _verificar_invariante_4_capacidad_vehiculo(
+            Mundo(tareas={"t1": tarea}, planes={"t1": plan})
+        )
+
+        assert len(violaciones) == 1
+        assert violaciones[0].invariante == "INV-4-capacidad-vehiculo"
 
 
-class TestInvariante5NoVerificada:
-    """Pruebas de que INV-5 aparece en no_verificadas."""
-    
-    def test_invariante_5_en_no_verificadas(self):
-        registro = RegistroReservas()
-        mundo = Mundo()
-        violaciones, no_verificadas = verificar_invariantes(mundo, registro)
-        
-        inv5 = [nv for nv in no_verificadas if nv.invariante == "INV-5-jeep-aristas-validas"]
-        assert len(inv5) == 1
-        assert "motor de asignación" in inv5[0].motivo
+class TestInvariante5RutaJeepPlan:
+    """INV-5 verifica rutas terrestres usando el grafo del mundo."""
+
+    def _mundo(self, bloqueada=False, medios=None):
+        tarea = Tarea(
+            id="t1", tipo="traslado", nodo_destino="destino",
+            estado=EstadoTarea.ASIGNADA, cuidadores_asignados=("c1",),
+        )
+        plan = PlanEjecucion(
+            tarea_id="t1", cuidadores=("c1",), vehiculo_id="v1",
+            desde=10, hasta=20, ruta=("garaje", "destino"),
+        )
+        vehiculo = Vehiculo(
+            id="v1", tipo=TipoVehiculo.JEEP, velocidad=5,
+            capacidad_personas=2, capacidad_animales=1,
+            certificacion_requerida=Certificacion.JEEP, ubicacion="garaje",
+        )
+        arista = Arista(
+            "garaje", "destino", 10,
+            frozenset(medios if medios is not None else {MedioPermitido.JEEP}),
+            bloqueada,
+        )
+        return Mundo(
+            tareas={"t1": tarea}, planes={"t1": plan},
+            vehiculos={"v1": vehiculo},
+            nodos={
+                "garaje": Nodo("garaje", TipoNodo.GARAJE, 0, 0),
+                "destino": Nodo("destino", TipoNodo.RECINTO, 1, 1),
+            },
+            aristas={("garaje", "destino"): arista},
+        )
+
+    def test_ruta_jeep_valida_no_viola(self):
+        assert _verificar_invariante_5_ruta_jeep(self._mundo()) == []
+
+    def test_ruta_camion_bloqueada_produce_violacion(self):
+        tarea = Tarea(
+            id="t1", tipo="traslado", nodo_destino="destino",
+            estado=EstadoTarea.ASIGNADA, cuidadores_asignados=("c1",),
+        )
+        plan = PlanEjecucion(
+            tarea_id="t1", cuidadores=("c1",), vehiculo_id="v1",
+            desde=10, hasta=20, ruta=("garaje", "destino"),
+        )
+        vehiculo = Vehiculo(
+            id="v1", tipo=TipoVehiculo.CAMION_TRASLADO, velocidad=5,
+            capacidad_personas=2, capacidad_animales=1,
+            certificacion_requerida=Certificacion.CAMION_TRASLADO,
+            ubicacion="garaje",
+        )
+        mundo = Mundo(
+            tareas={"t1": tarea}, planes={"t1": plan},
+            vehiculos={"v1": vehiculo},
+            nodos={
+                "garaje": Nodo("garaje", TipoNodo.GARAJE, 0, 0),
+                "destino": Nodo("destino", TipoNodo.RECINTO, 1, 1),
+            },
+            aristas={
+                ("garaje", "destino"): Arista(
+                    "garaje", "destino", 10,
+                    frozenset({MedioPermitido.JEEP}),
+                    bloqueada=True,
+                ),
+            },
+        )
+
+        violaciones = _verificar_invariante_5_ruta_jeep(mundo)
+
+        assert len(violaciones) == 1
+        assert violaciones[0].invariante == "INV-5-jeep-aristas-validas"
+
+    @pytest.mark.parametrize("bloqueada, medios", [
+        (True, {MedioPermitido.JEEP}),
+        (False, {MedioPermitido.PIE}),
+    ])
+    def test_ruta_jeep_no_transitable_produce_violacion(self, bloqueada, medios):
+        violaciones = _verificar_invariante_5_ruta_jeep(
+            self._mundo(bloqueada=bloqueada, medios=medios)
+        )
+
+        assert len(violaciones) == 1
+        assert violaciones[0].invariante == "INV-5-jeep-aristas-validas"
+
+    def test_plan_con_vehiculo_inexistente_produce_violacion(self):
+        tarea = Tarea(
+            id="t1", tipo="traslado", estado=EstadoTarea.ASIGNADA,
+        )
+        plan = PlanEjecucion(
+            tarea_id="t1", cuidadores=("c1",), vehiculo_id="v-missing",
+            desde=10, hasta=20,
+        )
+
+        violaciones = _verificar_invariante_5_ruta_jeep(
+            Mundo(tareas={"t1": tarea}, planes={"t1": plan})
+        )
+
+        assert len(violaciones) == 1
+        assert violaciones[0].invariante == "INV-5-jeep-aristas-validas"
+
+
+def test_inv9_reporta_referencias_rotas_en_planes():
+    plan = PlanEjecucion(
+        tarea_id="missing-task",
+        cuidadores=("missing-caregiver",),
+        vehiculo_id="missing-vehicle",
+        equipos=("missing-equipment",),
+        desde=10,
+        hasta=20,
+    )
+    mundo = Mundo(planes={"missing-task": plan})
+
+    violaciones, _ = verificar_invariantes(mundo, RegistroReservas())
+
+    assert len(violaciones) == 4
+    assert all(
+        item.invariante == "INV-9-planes-consistentes"
+        for item in violaciones
+    )
+    assert {item.detalle for item in violaciones} == {
+        "La tarea missing-task no existe",
+        "El cuidador missing-caregiver no existe",
+        "El vehículo missing-vehicle no existe",
+        "El equipo missing-equipment no existe",
+    }
+
+
+def test_inv9_no_viola_un_plan_con_referencias_existentes():
+    tarea = Tarea(id="t1", tipo="test")
+    plan = PlanEjecucion(
+        tarea_id="t1", cuidadores=("c1",), vehiculo_id="v1",
+        equipos=("e1",), desde=10, hasta=20,
+    )
+    mundo = Mundo(
+        tareas={"t1": tarea},
+        cuidadores={"c1": Cuidador("c1", "Test")},
+        vehiculos={
+            "v1": Vehiculo(
+                id="v1", tipo=TipoVehiculo.CAMION_TRASLADO, velocidad=5,
+                capacidad_personas=2, capacidad_animales=1,
+                certificacion_requerida=Certificacion.CAMION_TRASLADO,
+                ubicacion="garaje",
+            ),
+        },
+        equipos={"e1": Equipo("e1", TipoEquipo.RED_CAPTURA, "bodega")},
+        planes={"t1": plan},
+    )
+
+    assert _verificar_invariante_9_planes_consistentes(mundo) == []
+
+
+def test_tarea_activa_sin_plan_deja_inv4_e_inv5_sin_verificar():
+    tarea = Tarea(
+        id="t1", tipo="test", estado=EstadoTarea.ASIGNADA,
+        cuidadores_asignados=("c1",),
+    )
+    mundo = Mundo(
+        tareas={"t1": tarea},
+        cuidadores={"c1": Cuidador("c1", "Test", estado=EstadoCuidador.EJECUTANDO)},
+    )
+
+    _, no_verificadas = verificar_invariantes(mundo, RegistroReservas())
+
+    assert {
+        item.invariante for item in no_verificadas
+    } == {"INV-4-capacidad-vehiculo", "INV-5-jeep-aristas-validas"}
+    assert all("tarea activa t1" in item.motivo for item in no_verificadas)
 
 
 class TestInvariante6AnimalEnRecintoValido:
@@ -420,11 +665,7 @@ class TestVerificarInvariantesCompleto:
         
         violaciones, no_verificadas = verificar_invariantes(mundo, self.registro)
         assert len(violaciones) == 0
-        # INV-4 e INV-5 deben estar en no_verificadas
-        assert len(no_verificadas) == 2
-        inv_ids = {nv.invariante for nv in no_verificadas}
-        assert "INV-4-capacidad-vehiculo" in inv_ids
-        assert "INV-5-jeep-aristas-validas" in inv_ids
+        assert no_verificadas == []
     
     def test_formatear_violaciones(self):
         v = ViolacionInvariante("INV-1", "Cuidador", "c1", "falta habilidad")

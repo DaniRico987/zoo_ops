@@ -50,6 +50,14 @@ class RecursosInvalidos(ErrorDominio):
         super().__init__(msg)
 
 
+class PlanInvalido(ErrorDominio):
+    """Lanzada cuando un plan de ejecución no cumple su estructura o requisitos."""
+
+    def __init__(self, errores: list):
+        self.errores = errores
+        super().__init__("Plan de ejecución inválido: " + "; ".join(errores))
+
+
 class InvarianzaViolada(ErrorDominio):
     """Lanzada cuando se viola una invariante del sistema."""
     def __init__(self, invariante: str, detalle: str = ""):

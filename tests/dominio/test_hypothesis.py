@@ -37,6 +37,7 @@ from zoo_ops.dominio.eventos import (
     verificar_reconstruccion,
 )
 from zoo_ops.dominio.invariantes import verificar_invariantes
+from zoo_ops.dominio.plan import PlanEjecucion
 from zoo_ops.dominio.reservas import (
     RegistroReservas, Reserva, TipoRecurso, reservar_atomico,
 )
@@ -638,13 +639,78 @@ def test_evento_no_reconstruible():
         reconstruir_estado([evento], Mundo())
 
 
-def test_invariantes_4_5_en_no_verificadas():
+def test_invariantes_4_5_mundo_vacio_no_tiene_violaciones_ni_no_verificadas():
     violaciones, no_verificadas = verificar_invariantes(Mundo(), RegistroReservas())
 
     assert violaciones == []
-    ids = {nv.invariante for nv in no_verificadas}
-    assert "INV-4-capacidad-vehiculo" in ids
-    assert "INV-5-jeep-aristas-validas" in ids
+    assert not {
+        nv.invariante for nv in no_verificadas
+    } & {"INV-4-capacidad-vehiculo", "INV-5-jeep-aristas-validas"}
+
+
+def test_invariantes_4_5_plan_valido_no_produce_violaciones_ni_no_verificadas():
+    tarea = Tarea(
+        id="t1", tipo="traslado", estado=EstadoTarea.ASIGNADA,
+        cuidadores_asignados=("c1",),
+    )
+    plan = PlanEjecucion(
+        tarea_id="t1", cuidadores=("c1",), vehiculo_id="v1",
+        desde=0, hasta=10,
+    )
+    mundo = Mundo(
+        tareas={"t1": tarea},
+        cuidadores={
+            "c1": Cuidador("c1", "Test", estado=EstadoCuidador.EJECUTANDO),
+        },
+        vehiculos={
+            "v1": Vehiculo(
+                id="v1", tipo=TipoVehiculo.HELICOPTERO,
+                velocidad=5, capacidad_personas=2, capacidad_animales=1,
+                certificacion_requerida=Certificacion.HELICOPTERO,
+                ubicacion="garaje",
+            ),
+        },
+        planes={"t1": plan},
+    )
+
+    violaciones, no_verificadas = verificar_invariantes(mundo, RegistroReservas())
+
+    assert violaciones == []
+    assert not {
+        item.invariante for item in no_verificadas
+    } & {"INV-4-capacidad-vehiculo", "INV-5-jeep-aristas-validas"}
+
+
+def test_invariantes_4_5_ignoran_plan_invalido_de_tarea_completada():
+    tarea = Tarea(id="t1", tipo="traslado", estado=EstadoTarea.COMPLETADA)
+    plan = PlanEjecucion(
+        tarea_id="t1", cuidadores=("c1", "c2"), vehiculo_id="v1",
+        desde=0, hasta=10,
+    )
+    mundo = Mundo(
+        tareas={"t1": tarea},
+        cuidadores={
+            "c1": Cuidador("c1", "Uno"),
+            "c2": Cuidador("c2", "Dos"),
+        },
+        vehiculos={
+            "v1": Vehiculo(
+                id="v1", tipo=TipoVehiculo.CAMION_TRASLADO,
+                velocidad=5, capacidad_personas=1, capacidad_animales=1,
+                certificacion_requerida=Certificacion.CAMION_TRASLADO,
+                ubicacion="garaje",
+            ),
+        },
+        planes={"t1": plan},
+    )
+
+    violaciones, no_verificadas = verificar_invariantes(mundo, RegistroReservas())
+
+    invariantes_4_5 = {
+        "INV-4-capacidad-vehiculo", "INV-5-jeep-aristas-validas",
+    }
+    assert not {item.invariante for item in violaciones} & invariantes_4_5
+    assert not {item.invariante for item in no_verificadas} & invariantes_4_5
 
 
 def test_estado_no_enum_en_ejecutar_transicion():

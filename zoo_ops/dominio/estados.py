@@ -23,6 +23,7 @@ from zoo_ops.dominio.eventos import (
     Evento, TipoEvento, RegistroEventos, aplicar_evento, crear_evento,
 )
 from zoo_ops.dominio.catalogos import ESPECIES_CATALOGO
+from zoo_ops.dominio.plan import cubre_requisitos_cuidadores
 
 
 # ============================================================================
@@ -272,10 +273,12 @@ def validar_transicion_tarea_extra(
                 f"Tarea {tarea_id} requiere al menos {tarea.personas_minimas} "
                 f"personas; se recibieron {len(cuidadores_ids)}"
             )
+        cuidadores = []
         for cuidador_id in cuidadores_ids:
             cuidador = mundo.cuidadores.get(cuidador_id)
             if cuidador is None:
                 return f"Cuidador {cuidador_id} no existe"
+            cuidadores.append(cuidador)
             if cuidador.estado != EstadoCuidador.DISPONIBLE:
                 return (
                     f"Cuidador {cuidador_id} no está DISPONIBLE "
@@ -285,6 +288,9 @@ def validar_transicion_tarea_extra(
                 mundo, cuidador_id, excluir_tarea_id=tarea_id
             ):
                 return f"Cuidador {cuidador_id} ya tiene una tarea activa (INV-3)"
+        errores_cobertura = cubre_requisitos_cuidadores(tarea, cuidadores)
+        if errores_cobertura:
+            return "; ".join(errores_cobertura)
 
     # Regla: No puede pasar a EN_CURSO ni COMPLETADA si tiene dependencias pendientes
     if estado_nuevo in {EstadoTarea.EN_CURSO, EstadoTarea.COMPLETADA}:

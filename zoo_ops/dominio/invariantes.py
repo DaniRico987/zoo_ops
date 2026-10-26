@@ -5,18 +5,15 @@ que retorna tupla (violaciones, no_verificadas).
 """
 
 from dataclasses import dataclass
-from typing import List, Dict, Set, Optional, Tuple
-from zoo_ops.dominio.entidades import (
-    Mundo, Cuidador, Animal, Vehiculo, Tarea, Recinto, Arista,
-    EstadoCuidador, EstadoAnimal, EstadoVehiculo, EstadoTarea, EstadoIncidente,
-    HabilidadRequerida
-)
-from zoo_ops.dominio.enums import (
-    Habilidad, Certificacion, TipoVehiculo, Medio, MedioPermitido
-)
-from zoo_ops.dominio.reservas import RegistroReservas, Reserva, TipoRecurso
+from typing import List, Dict, Optional, Tuple
+from zoo_ops.dominio.entidades import Mundo, Animal, Tarea, Recinto, EstadoAnimal, EstadoTarea
+from zoo_ops.dominio.reservas import RegistroReservas
 from zoo_ops.dominio.eventos import reconstruir_estado, verificar_reconstruccion, RegistroEventos
-from zoo_ops.dominio.catalogos import Especie, ESPECIES_CATALOGO
+from zoo_ops.dominio.catalogos import ESPECIES_CATALOGO
+from zoo_ops.dominio.plan import (
+    validar_capacidad_vehiculo, validar_ruta_terrestre,
+    cubre_requisitos_cuidadores,
+)
 
 
 @dataclass(frozen=True)
@@ -41,13 +38,13 @@ class NoVerificada:
 
 def _verificar_invariante_1_habilidades_cuidador(mundo: Mundo) -> List[ViolacionInvariante]:
     """
-    Invariante 1: Ningún cuidador está asignado a una tarea para la que le falte
-    una certificación o nivel de habilidad requerido.
+    Invariante 1: El conjunto de cuidadores asignados cubre requisitos de tarea.
     """
     violaciones = []
     
     for tarea in mundo.tareas.values():
         if tarea.estado in {EstadoTarea.ASIGNADA, EstadoTarea.EN_CURSO, EstadoTarea.PAUSADA}:
+            cuidadores = []
             for cuidador_id in tarea.cuidadores_asignados:
                 cuidador = mundo.cuidadores.get(cuidador_id)
                 if not cuidador:
@@ -58,31 +55,14 @@ def _verificar_invariante_1_habilidades_cuidador(mundo: Mundo) -> List[Violacion
                         detalle=f"Cuidador asignado {cuidador_id} no existe"
                     ))
                     continue
-
-                # Verificar habilidades
-                for hab_req in tarea.habilidades_requeridas:
-                    nivel = cuidador.habilidades.get(hab_req.habilidad, 0)
-                    if nivel < hab_req.nivel_minimo:
-                        violaciones.append(ViolacionInvariante(
-                            invariante="INV-1-habilidades-certificaciones",
-                            entidad_tipo="Cuidador",
-                            entidad_id=cuidador.id,
-                            detalle=(
-                                f"Falta habilidad {hab_req.habilidad.name}: "
-                                f"nivel {nivel} < {hab_req.nivel_minimo} "
-                                f"para tarea {tarea.id}"
-                            )
-                        ))
-
-                # Verificar certificaciones
-                for cert in tarea.certificaciones_requeridas:
-                    if cert not in cuidador.certificaciones:
-                        violaciones.append(ViolacionInvariante(
-                            invariante="INV-1-habilidades-certificaciones",
-                            entidad_tipo="Cuidador",
-                            entidad_id=cuidador.id,
-                            detalle=f"Falta certificación {cert.name} para tarea {tarea.id}"
-                        ))
+                cuidadores.append(cuidador)
+            for error in cubre_requisitos_cuidadores(tarea, cuidadores):
+                violaciones.append(ViolacionInvariante(
+                    invariante="INV-1-habilidades-certificaciones",
+                    entidad_tipo="Tarea",
+                    entidad_id=tarea.id,
+                    detalle=error,
+                ))
     
     return violaciones
 
@@ -149,33 +129,137 @@ def _verificar_invariante_3_una_tarea_activa(mundo: Mundo) -> List[ViolacionInva
 
 
 # ============================================================================
-# Invariante 4: Vehículo no supera capacidad (NO VERIFICADA)
+# Invariante 4: El vehículo del plan no supera su capacidad
 # ============================================================================
 
-def _no_verificada_invariante_4() -> NoVerificada:
-    """
-    INV-4 no verificada: requiere plan de ejecución (cuidadores, vehículo y ruta),
-    que se definirá junto con el motor de asignación.
-    """
-    return NoVerificada(
-        invariante="INV-4-capacidad-vehiculo",
-        motivo="requiere plan de ejecución (cuidadores, vehículo y ruta), que se definirá junto con el motor de asignación"
-    )
+def _verificar_invariante_4_capacidad_vehiculo(
+    mundo: Mundo,
+) -> List[ViolacionInvariante]:
+    """Comprueba las capacidades de personas y animales de cada plan activo."""
+    violaciones = []
+    estados_activos = {
+        EstadoTarea.ASIGNADA, EstadoTarea.EN_CURSO, EstadoTarea.PAUSADA,
+    }
+    for tarea in mundo.tareas.values():
+        if tarea.estado not in estados_activos:
+            continue
+        plan = mundo.planes.get(tarea.id)
+        if plan is None or plan.vehiculo_id is None:
+            continue
+        vehiculo = mundo.vehiculos.get(plan.vehiculo_id)
+        if vehiculo is None:
+            violaciones.append(ViolacionInvariante(
+                invariante="INV-4-capacidad-vehiculo",
+                entidad_tipo="PlanEjecucion",
+                entidad_id=tarea.id,
+                detalle=f"El vehículo {plan.vehiculo_id} no existe",
+            ))
+            continue
+        for error in validar_capacidad_vehiculo(
+            vehiculo, plan.cuidadores, plan.animales_transportados,
+        ):
+            violaciones.append(ViolacionInvariante(
+                invariante="INV-4-capacidad-vehiculo",
+                entidad_tipo="PlanEjecucion",
+                entidad_id=tarea.id,
+                detalle=error,
+            ))
+    return violaciones
 
 
 # ============================================================================
-# Invariante 5: Jeep solo por aristas que permitan jeep (NO VERIFICADA)
+# Invariante 5: Las rutas terrestres utilizan aristas transitables
 # ============================================================================
 
-def _no_verificada_invariante_5() -> NoVerificada:
-    """
-    INV-5 no verificada: requiere plan de ejecución (cuidadores, vehículo y ruta),
-    que se definirá junto con el motor de asignación.
-    """
-    return NoVerificada(
-        invariante="INV-5-jeep-aristas-validas",
-        motivo="requiere plan de ejecución (cuidadores, vehículo y ruta), que se definirá junto con el motor de asignación"
-    )
+def _verificar_invariante_5_ruta_jeep(mundo: Mundo) -> List[ViolacionInvariante]:
+    """Comprueba la ruta terrestre definida por cada plan activo."""
+    violaciones = []
+    estados_activos = {
+        EstadoTarea.ASIGNADA, EstadoTarea.EN_CURSO, EstadoTarea.PAUSADA,
+    }
+    for tarea in mundo.tareas.values():
+        if tarea.estado not in estados_activos:
+            continue
+        plan = mundo.planes.get(tarea.id)
+        if plan is None or plan.vehiculo_id is None:
+            continue
+        vehiculo = mundo.vehiculos.get(plan.vehiculo_id)
+        if vehiculo is None:
+            violaciones.append(ViolacionInvariante(
+                invariante="INV-5-jeep-aristas-validas",
+                entidad_tipo="PlanEjecucion",
+                entidad_id=tarea.id,
+                detalle=f"El vehículo {plan.vehiculo_id} no existe",
+            ))
+            continue
+        for error in validar_ruta_terrestre(mundo, tarea, plan):
+            violaciones.append(ViolacionInvariante(
+                invariante="INV-5-jeep-aristas-validas",
+                entidad_tipo="PlanEjecucion",
+                entidad_id=tarea.id,
+                detalle=error,
+            ))
+    return violaciones
+
+
+def _verificar_invariante_9_planes_consistentes(
+    mundo: Mundo,
+) -> List[ViolacionInvariante]:
+    """Comprueba que todos los planes apunten a entidades existentes."""
+    violaciones = []
+    for plan in mundo.planes.values():
+        if plan.tarea_id not in mundo.tareas:
+            violaciones.append(ViolacionInvariante(
+                invariante="INV-9-planes-consistentes",
+                entidad_tipo="PlanEjecucion",
+                entidad_id=plan.tarea_id,
+                detalle=f"La tarea {plan.tarea_id} no existe",
+            ))
+        for cuidador_id in plan.cuidadores:
+            if cuidador_id not in mundo.cuidadores:
+                violaciones.append(ViolacionInvariante(
+                    invariante="INV-9-planes-consistentes",
+                    entidad_tipo="PlanEjecucion",
+                    entidad_id=plan.tarea_id,
+                    detalle=f"El cuidador {cuidador_id} no existe",
+                ))
+        if (
+            plan.vehiculo_id is not None
+            and plan.vehiculo_id not in mundo.vehiculos
+        ):
+            violaciones.append(ViolacionInvariante(
+                invariante="INV-9-planes-consistentes",
+                entidad_tipo="PlanEjecucion",
+                entidad_id=plan.tarea_id,
+                detalle=f"El vehículo {plan.vehiculo_id} no existe",
+            ))
+        for equipo_id in plan.equipos:
+            if equipo_id not in mundo.equipos:
+                violaciones.append(ViolacionInvariante(
+                    invariante="INV-9-planes-consistentes",
+                    entidad_tipo="PlanEjecucion",
+                    entidad_id=plan.tarea_id,
+                    detalle=f"El equipo {equipo_id} no existe",
+                ))
+    return violaciones
+
+
+def _no_verificadas_sin_plan(
+    mundo: Mundo,
+    invariante: str,
+) -> List[NoVerificada]:
+    """Enumera tareas activas cuyo plan todavía no está registrado."""
+    estados_activos = {
+        EstadoTarea.ASIGNADA, EstadoTarea.EN_CURSO, EstadoTarea.PAUSADA,
+    }
+    return [
+        NoVerificada(
+            invariante=invariante,
+            motivo=f"la tarea activa {tarea.id} todavía no tiene un plan de ejecución",
+        )
+        for tarea in mundo.tareas.values()
+        if tarea.estado in estados_activos and tarea.id not in mundo.planes
+    ]
 
 
 # ============================================================================
@@ -333,11 +417,15 @@ def verificar_invariantes(
     # Invariante 3: Una tarea activa por cuidador
     todas_violaciones.extend(_verificar_invariante_3_una_tarea_activa(mundo))
     
-    # Invariante 4: NO VERIFICADA
-    no_verificadas.append(_no_verificada_invariante_4())
-    
-    # Invariante 5: NO VERIFICADA
-    no_verificadas.append(_no_verificada_invariante_5())
+    # Invariantes 4 y 5: planes de ejecución
+    todas_violaciones.extend(_verificar_invariante_4_capacidad_vehiculo(mundo))
+    todas_violaciones.extend(_verificar_invariante_5_ruta_jeep(mundo))
+    no_verificadas.extend(
+        _no_verificadas_sin_plan(mundo, "INV-4-capacidad-vehiculo")
+    )
+    no_verificadas.extend(
+        _no_verificadas_sin_plan(mundo, "INV-5-jeep-aristas-validas")
+    )
     
     # Invariante 6: Animal en recinto válido
     todas_violaciones.extend(_verificar_invariante_6_animal_en_recinto_valido(mundo))
@@ -359,6 +447,9 @@ def verificar_invariantes(
     
     # Invariante 8: Dependencias de tareas
     todas_violaciones.extend(_verificar_invariante_8_dependencias_tarea(mundo))
+
+    # Invariante 9: Referencias de planes existentes
+    todas_violaciones.extend(_verificar_invariante_9_planes_consistentes(mundo))
     
     return todas_violaciones, no_verificadas
 

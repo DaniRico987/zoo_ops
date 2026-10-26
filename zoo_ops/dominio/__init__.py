@@ -42,7 +42,11 @@ from .eventos import (
 from .reservas import (
     TipoRecurso, Reserva, RegistroReservas,
     reservar_atomico, liberar_reservas_tarea, verificar_disponibilidad_recurso,
-    crear_reservas_para_tarea, validar_recursos_para_tarea, reservar_para_tarea,
+    paquete_de_reservas, reservar_plan,
+)
+from .plan import (
+    PlanEjecucion, cubre_requisitos_cuidadores, validar_capacidad_vehiculo,
+    validar_ruta_terrestre, validar_plan, exigir_plan_valido,
 )
 from .invariantes import (
     verificar_invariantes, ViolacionInvariante, NoVerificada,
@@ -52,7 +56,7 @@ from .errores import (
     ErrorDominio, TransicionInvalida, ReservaInvalida, ReservaAtomicaFallida,
     RecursosInvalidos, InvarianzaViolada, RecursoNoDisponible, HabilidadInsuficiente,
     CertificacionFaltante, DependenciasPendientes, DependenciaInexistente,
-    EventoNoSoportado, EventoDuplicado, TiempoRetrocede,
+    EventoNoSoportado, EventoDuplicado, TiempoRetrocede, PlanInvalido,
 )
 
 __all__ = [
@@ -81,7 +85,11 @@ __all__ = [
     # reservas
     "TipoRecurso", "Reserva", "RegistroReservas",
     "reservar_atomico", "liberar_reservas_tarea", "verificar_disponibilidad_recurso",
-    "crear_reservas_para_tarea", "validar_recursos_para_tarea", "reservar_para_tarea",
+    "paquete_de_reservas", "reservar_plan",
+    # plan
+    "PlanEjecucion", "cubre_requisitos_cuidadores",
+    "validar_capacidad_vehiculo", "validar_ruta_terrestre", "validar_plan",
+    "exigir_plan_valido",
     # invariantes
     "verificar_invariantes", "ViolacionInvariante", "NoVerificada",
     "formatear_violaciones", "formatear_no_verificadas", "assert_sin_violaciones",
@@ -90,4 +98,5 @@ __all__ = [
     "RecursosInvalidos", "InvarianzaViolada", "RecursoNoDisponible", "HabilidadInsuficiente",
     "CertificacionFaltante", "DependenciasPendientes", "DependenciaInexistente",
     "EventoNoSoportado", "EventoDuplicado", "TiempoRetrocede",
+    "PlanInvalido",
 ]
