@@ -5,6 +5,7 @@ Una reserva atómica: o se crean TODAS o no se crea ninguna.
 Orden determinista para evitar deadlocks.
 """
 
+import copy
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional
 from enum import Enum, auto
@@ -65,6 +66,19 @@ class RegistroReservas:
     Mantiene reservas ordenadas por tiempo para detección eficiente de solapamientos.
     """
     _reservas_por_recurso: Dict[Tuple[TipoRecurso, str], List[Reserva]] = field(default_factory=dict)
+
+    def instantanea(self) -> Dict[Tuple[TipoRecurso, str], List[Reserva]]:
+        """Devuelve una copia profunda de las reservas por recurso."""
+        return copy.deepcopy(self._reservas_por_recurso)
+
+    def restaurar(
+        self,
+        instantanea: Dict[Tuple[TipoRecurso, str], List[Reserva]],
+    ) -> None:
+        """Restaura las reservas sin reemplazar esta instancia."""
+        if not isinstance(instantanea, dict):
+            raise TypeError("instantanea debe ser un diccionario de reservas")
+        self._reservas_por_recurso = copy.deepcopy(instantanea)
     
     def _clave(self, recurso_tipo: TipoRecurso, recurso_id: str) -> Tuple[TipoRecurso, str]:
         return (recurso_tipo, recurso_id)
@@ -116,10 +130,13 @@ class RegistroReservas:
     def liberar_reservas_de_tarea(self, tarea_id: str) -> List[Reserva]:
         """Libera todas las reservas de una tarea y las retorna."""
         liberadas = []
-        for clave, reservas in self._reservas_por_recurso.items():
+        for clave, reservas in list(self._reservas_por_recurso.items()):
             nuevas = [r for r in reservas if r.tarea_id != tarea_id]
             liberadas.extend([r for r in reservas if r.tarea_id == tarea_id])
-            self._reservas_por_recurso[clave] = nuevas
+            if nuevas:
+                self._reservas_por_recurso[clave] = nuevas
+            else:
+                del self._reservas_por_recurso[clave]
         return liberadas
     
     def obtener_reservas_de_tarea(self, tarea_id: str) -> List[Reserva]:

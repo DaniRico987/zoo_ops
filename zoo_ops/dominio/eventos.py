@@ -147,6 +147,23 @@ class RegistroEventos:
         self._eventos: List[Evento] = []
         self._ultimo_id_evento = 0
 
+    def instantanea(self) -> tuple:
+        """Devuelve una copia profunda de los eventos y del contador de IDs."""
+        return copy.deepcopy((self._eventos, self._ultimo_id_evento))
+
+    def restaurar(self, instantanea: tuple) -> None:
+        """Restaura los eventos y el contador sin reemplazar el registro."""
+        if (
+            not isinstance(instantanea, tuple)
+            or len(instantanea) != 2
+            or not isinstance(instantanea[0], list)
+            or not isinstance(instantanea[1], int)
+        ):
+            raise TypeError("instantanea no es válida para RegistroEventos")
+        eventos, ultimo_id = copy.deepcopy(instantanea)
+        self._eventos = eventos
+        self._ultimo_id_evento = ultimo_id
+
     def siguiente_id_evento(self) -> int:
         """Genera un ID incremental, aislado de los demás registros."""
         self._ultimo_id_evento += 1

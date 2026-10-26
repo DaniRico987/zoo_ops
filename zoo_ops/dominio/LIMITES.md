@@ -14,11 +14,15 @@
 
 **Mutación y `reconstruir_estado`**: `aplicar_evento` muta el `Mundo` recibido. Por eso `reconstruir_estado` parte de `copy.deepcopy(estado_inicial)`; el llamador conserva el mundo inicial intacto, pero debe saber que el mundo devuelto es una copia nueva, no el mismo objeto.
 
+**Instantáneas y restauración**: `Mundo`, `RegistroEventos` y `RegistroReservas` crean instantáneas profundas y restauran el contenido sobre la misma instancia. El coste de copiar y restaurar es proporcional al tamaño del mundo y sus registros.
+
 ## (b) INV-4, INV-5, INV-7 e INV-10
 
 **INV-4 (capacidad del vehículo)** y **INV-5 (ruta terrestre)** se verifican a partir de `Mundo.planes`. Los planes con referencias a vehículos ausentes generan violaciones, y INV-9 comprueba todas las referencias de planes.
 
 **INV-10 (tarea-plan)** exige que toda tarea activa tenga un plan y que los cuidadores asignados coincidan con los del plan. La ausencia de plan es una violación de INV-10, no una condición no verificada de INV-4 o INV-5.
+
+**INV-11 (reservas-plan)** compara exactamente las reservas de cada tarea activa con plan y detecta reservas asociadas a tareas inexistentes. Las reservas de una operación compuesta se revierten junto con el mundo y los eventos si falla cualquier paso.
 
 **INV-7 (mundo vivo == reconstruido)**: `verificar_invariantes` solo puede comprobarla si el llamador aporta el estado inicial (`estado_inicial=`); el estado inicial no puede inferirse del estado vivo. Si se pasa `registro_eventos` sin `estado_inicial`, INV-7 aparece en `no_verificadas` en lugar de dar un resultado falso.
 
@@ -49,7 +53,7 @@
 
 **Campos extra sí reproducibles**: `Animal.ubicacion` cuando la transición es `EN_RECINTO` (vía `recinto_destino`) y `Tarea.cuidadores_asignados` en `ASIGNADA` / `PENDIENTE` (vía `datos_extra["cuidadores_ids"]`). Son los únicos campos que un `CAMBIO_ESTADO` escribe además de `estado`.
 
-**Atomicidad por operación, no por despacho compuesto**: `ejecutar_transicion`, `registrar_plan_con_evento` y `liberar_plan_con_evento` validan antes de mutar y revierten el estado afectado y el reloj si `RegistroEventos.anexar` falla. La validación y reserva del plan son atómicas respecto al registro de reservas, pero registrar el plan, reservar sus recursos y asignar la tarea aún no forman una única operación compuesta.
+**Vías de asignación**: `asignar_plan` y `desasignar_plan` son las operaciones compuestas previstas y restauran mundo, eventos (incluido el contador de IDs) y reservas ante cualquier excepción. `ejecutar_transicion` a `ASIGNADA` sigue disponible directamente y exige que el plan ya exista; no cambia el estado de cuidadores ni vehículo, por lo que INV-11 detecta las reservas que falten.
 
 ## (d) Eventos: aplicación y reconstrucción
 
@@ -73,11 +77,15 @@
 
 ## (e) Reservas
 
-`paquete_de_reservas(plan)` construye una reserva por cada cuidador, por el vehículo si se especifica, y por cada equipo, todos en el intervalo `[desde, hasta)` del plan. `reservar_plan(mundo, registro, plan)` resuelve la tarea desde el mundo, exige que `validar_plan` no encuentre errores y luego delega el paquete a `reservar_atomico`; un solapamiento no deja reservas parciales. No registra el plan ni cambia estados. El registro y la liberación del plan sí generan eventos; la reserva y asignación conjunta siguen fuera de una operación compuesta.
+`paquete_de_reservas(plan)` construye una reserva por cada cuidador, por el vehículo si se especifica, y por cada equipo, todos en el intervalo `[desde, hasta)` del plan. `reservar_plan(mundo, registro, plan)` resuelve la tarea desde el mundo, exige que `validar_plan` no encuentre errores y luego delega el paquete a `reservar_atomico`; un solapamiento no deja reservas parciales. No registra el plan ni cambia estados. `asignar_plan` y `desasignar_plan` coordinan reservas, eventos y transiciones en una única operación reversible.
 
 `liberar_plan_con_evento` rechaza liberar el plan mientras la tarea esté activa, para conservar INV-10.
 
 `PlanEjecucion` exige cuidadores no vacíos y únicos, IDs de equipo y animales únicos, y `hasta > desde`; `desde` y `hasta` son obligatorios. El vehículo y los equipos concretos son opcionales cuando la tarea no los requiere; los requisitos se expresan mediante `vehiculo_requerido` y `equipos_requeridos`. Los requisitos repetidos de un tipo de equipo representan una cantidad mínima. Los animales transportados deben existir y requieren vehículo.
+
+`asignar_plan` cambia a `ASIGNADO` a los cuidadores y a `RESERVADO` al vehículo, si existe. Los equipos no cambian de estado: siguen `DISPONIBLE` y solo se reservan por intervalo. `desasignar_plan` revierte estados y reservas solo antes de iniciar la tarea. El inicio y cierre de ejecución (`EN_CAMINO`, `EJECUTANDO`, `COMPLETADA`) quedan fuera de esta entrega.
+
+La transición `ASIGNADO -> DISPONIBLE` de cuidador está permitida para revertir una asignación antes de salir hacia la tarea.
 
 ## (f) Dudas abiertas
 

@@ -40,6 +40,7 @@ TRANSICIONES_CUIDADOR: Dict[EstadoCuidador, FrozenSet[EstadoCuidador]] = {
     }),
     EstadoCuidador.ASIGNADO: frozenset({
         EstadoCuidador.EN_CAMINO,
+        # Permite revertir una asignación antes de iniciar el desplazamiento.
         EstadoCuidador.DISPONIBLE,
         EstadoCuidador.FUERA_DE_TURNO,
     }),

@@ -120,6 +120,20 @@ class TestTablasDeTransiciones:
 # ============================================================================
 
 class TestCuidador:
+    def test_asignado_puede_volver_a_disponible_antes_de_salir(self):
+        mundo = Mundo(cuidadores={
+            "c1": _cuidador(EstadoCuidador.ASIGNADO),
+        })
+        registro = RegistroEventos()
+
+        evento = ejecutar_transicion(
+            mundo, registro, "Cuidador", "c1",
+            EstadoCuidador.DISPONIBLE, 10, "cancelar asignación",
+        )
+
+        assert evento.estado_antes == "ASIGNADO"
+        assert mundo.cuidadores["c1"].estado == EstadoCuidador.DISPONIBLE
+
     def test_transicion_valida_muta_mundo_y_anexa_evento(self):
         mundo = Mundo(cuidadores={"c1": _cuidador()})
         registro = RegistroEventos()

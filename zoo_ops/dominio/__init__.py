@@ -48,7 +48,10 @@ from .reservas import (
 from .plan import (
     PlanEjecucion, cubre_requisitos_cuidadores, validar_capacidad_vehiculo,
     validar_ruta_terrestre, validar_plan, exigir_plan_valido,
+)
+from .operaciones import (
     registrar_plan_con_evento, liberar_plan_con_evento,
+    asignar_plan, desasignar_plan,
 )
 from .invariantes import (
     verificar_invariantes, ViolacionInvariante, NoVerificada,
@@ -93,7 +96,7 @@ __all__ = [
     "PlanEjecucion", "cubre_requisitos_cuidadores",
     "validar_capacidad_vehiculo", "validar_ruta_terrestre", "validar_plan",
     "exigir_plan_valido", "registrar_plan_con_evento",
-    "liberar_plan_con_evento",
+    "liberar_plan_con_evento", "asignar_plan", "desasignar_plan",
     # invariantes
     "verificar_invariantes", "ViolacionInvariante", "NoVerificada",
     "formatear_violaciones", "formatear_no_verificadas", "assert_sin_violaciones",

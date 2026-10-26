@@ -5,9 +5,12 @@ que retorna tupla (violaciones, no_verificadas).
 """
 
 from dataclasses import dataclass
+from collections import Counter
 from typing import List, Dict, Optional, Tuple
 from zoo_ops.dominio.entidades import Mundo, Animal, Tarea, Recinto, EstadoAnimal, EstadoTarea
-from zoo_ops.dominio.reservas import RegistroReservas
+from zoo_ops.dominio.reservas import (
+    RegistroReservas, paquete_de_reservas,
+)
 from zoo_ops.dominio.eventos import reconstruir_estado, verificar_reconstruccion, RegistroEventos
 from zoo_ops.dominio.catalogos import ESPECIES_CATALOGO
 from zoo_ops.dominio.plan import (
@@ -276,6 +279,61 @@ def _verificar_invariante_10_tarea_plan(
     return violaciones
 
 
+def _verificar_invariante_11_reservas_plan(
+    mundo: Mundo,
+    registro: RegistroReservas,
+) -> List[ViolacionInvariante]:
+    """Compara reservas de tareas activas con el paquete de cada plan."""
+    violaciones = []
+    estados_activos = {
+        EstadoTarea.ASIGNADA, EstadoTarea.EN_CURSO, EstadoTarea.PAUSADA,
+    }
+    for tarea in mundo.tareas.values():
+        if tarea.estado not in estados_activos:
+            continue
+        plan = mundo.planes.get(tarea.id)
+        if plan is None:
+            continue
+        esperadas = Counter(paquete_de_reservas(plan))
+        existentes = Counter(
+            reserva
+            for reservas in registro._reservas_por_recurso.values()
+            for reserva in reservas
+            if reserva.tarea_id == tarea.id
+        )
+        for reserva, cantidad in (esperadas - existentes).items():
+            for _ in range(cantidad):
+                violaciones.append(ViolacionInvariante(
+                    invariante="INV-11-reservas-plan",
+                    entidad_tipo="Reserva",
+                    entidad_id=reserva.recurso_id,
+                    detalle=f"Falta la reserva esperada {reserva}",
+                ))
+        for reserva, cantidad in (existentes - esperadas).items():
+            for _ in range(cantidad):
+                violaciones.append(ViolacionInvariante(
+                    invariante="INV-11-reservas-plan",
+                    entidad_tipo="Reserva",
+                    entidad_id=reserva.recurso_id,
+                    detalle=f"Sobra la reserva no prevista {reserva}",
+                ))
+
+    for reservas in registro._reservas_por_recurso.values():
+        for reserva in reservas:
+            if reserva.tarea_id not in mundo.tareas:
+                violaciones.append(ViolacionInvariante(
+                    invariante="INV-11-reservas-plan",
+                    entidad_tipo="Reserva",
+                    entidad_id=reserva.recurso_id,
+                    detalle=(
+                        f"La reserva de {reserva.recurso_tipo.name}:"
+                        f"{reserva.recurso_id} referencia la tarea inexistente "
+                        f"{reserva.tarea_id}"
+                    ),
+                ))
+    return violaciones
+
+
 # ============================================================================
 # Invariante 6: Animal en recinto que admite su especie
 # ============================================================================
@@ -461,6 +519,11 @@ def verificar_invariantes(
 
     # Invariante 10: Cada tarea activa conserva su plan y el equipo asignado.
     todas_violaciones.extend(_verificar_invariante_10_tarea_plan(mundo))
+
+    # Invariante 11: Las reservas de cada plan activo coinciden exactamente.
+    todas_violaciones.extend(
+        _verificar_invariante_11_reservas_plan(mundo, registro)
+    )
     
     return todas_violaciones, no_verificadas
 

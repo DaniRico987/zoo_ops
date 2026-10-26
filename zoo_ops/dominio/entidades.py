@@ -3,7 +3,7 @@ Entidades del dominio de zoo-ops.
 Dataclasses inmutables (frozen) para las entidades principales.
 Mundo es un agregado mutable que centraliza las mutaciones de sus colecciones.
 """
-
+import copy
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple, Union, TYPE_CHECKING
 from zoo_ops.dominio.enums import (
@@ -230,6 +230,18 @@ class Mundo:
     sensores: Dict[str, Sensor] = field(default_factory=dict)
     lecturas: List[Lectura] = field(default_factory=list)
     tiempo_actual: int = 0  # reloj simulado en segundos
+
+    def instantanea(self) -> "Mundo":
+        """Devuelve una copia profunda del estado completo del mundo."""
+        return copy.deepcopy(self)
+
+    def restaurar(self, instantanea: "Mundo") -> None:
+        """Restaura el contenido del mundo sin reemplazar esta instancia."""
+        if not isinstance(instantanea, Mundo):
+            raise TypeError("instantanea debe ser una instancia de Mundo")
+        estado = copy.deepcopy(instantanea)
+        for nombre in self.__dataclass_fields__:
+            setattr(self, nombre, getattr(estado, nombre))
     
     # Métodos de mutación centralizados
     def sustituir_entidad(self, coleccion: str, entidad_id: str, entidad) -> None:

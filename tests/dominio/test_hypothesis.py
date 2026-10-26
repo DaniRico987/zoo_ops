@@ -657,6 +657,8 @@ def test_invariantes_4_5_mundo_vacio_no_tiene_violaciones_ni_no_verificadas():
 
 
 def test_invariantes_4_5_plan_valido_no_produce_violaciones_ni_no_verificadas():
+    from zoo_ops.dominio.reservas import paquete_de_reservas
+
     tarea = Tarea(
         id="t1", tipo="traslado", estado=EstadoTarea.ASIGNADA,
         cuidadores_asignados=("c1",),
@@ -681,7 +683,9 @@ def test_invariantes_4_5_plan_valido_no_produce_violaciones_ni_no_verificadas():
         planes={"t1": plan},
     )
 
-    violaciones, no_verificadas = verificar_invariantes(mundo, RegistroReservas())
+    reservas = RegistroReservas()
+    reservar_atomico(reservas, paquete_de_reservas(plan))
+    violaciones, no_verificadas = verificar_invariantes(mundo, reservas)
 
     assert violaciones == []
     assert not {

@@ -22,7 +22,10 @@ from zoo_ops.dominio.eventos import (
 )
 from zoo_ops.dominio.plan import (
     PlanEjecucion, cubre_requisitos_cuidadores, exigir_plan_valido,
-    liberar_plan_con_evento, registrar_plan_con_evento, validar_plan,
+    validar_plan,
+)
+from zoo_ops.dominio.operaciones import (
+    liberar_plan_con_evento, registrar_plan_con_evento,
 )
 
 
@@ -190,6 +193,14 @@ class TestValidarPlan:
 
         assert validar_plan(mundo, _plan()) == []
         assert mundo == antes
+
+    def test_plan_duplicado_se_rechaza(self):
+        mundo = _mundo()
+        mundo.registrar_plan(_plan())
+
+        errores = validar_plan(mundo, _plan())
+
+        assert any("ya tiene un plan registrado" in error for error in errores)
 
     def test_plan_que_referencia_tarea_inexistente_se_rechaza(self):
         mundo = _mundo()
