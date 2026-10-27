@@ -7,7 +7,8 @@ from dataclasses import FrozenInstanceError
 from zoo_ops.dominio.entidades import (
     Nodo, Arista, Recinto, Cuidador, Vehiculo, IndicadoresSalud, Animal,
     Equipo, Tarea, HabilidadRequerida, Incidente, Sensor, Lectura, Mundo,
-    esta_en_nodo, esta_en_arista, obtener_nodo_actual, obtener_arista_actual
+    esta_en_nodo, esta_en_arista, obtener_nodo_actual, obtener_arista_actual,
+    ubicacion_en_nodo, nodo_de_ubicacion,
 )
 from zoo_ops.dominio.enums import (
     TipoNodo, TipoRecinto, Medio, MedioPermitido, TipoVehiculo, TipoEquipo,
@@ -300,3 +301,9 @@ class TestUtilidadesUbicacion:
     def test_obtener_arista_actual(self):
         assert obtener_arista_actual(("n1", "n2", 0.5)) == ("n1", "n2", 0.5)
         assert obtener_arista_actual(("n1",)) is None
+
+    def test_helpers_de_ubicacion_de_nodo(self):
+        assert ubicacion_en_nodo("n1") == ("n1",)
+        assert nodo_de_ubicacion(("n1",)) == "n1"
+        assert nodo_de_ubicacion(("n1", "n2", 0.5)) is None
+        assert nodo_de_ubicacion(()) is None

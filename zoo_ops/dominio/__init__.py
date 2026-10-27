@@ -28,6 +28,7 @@ from .entidades import (
     Nodo, Arista, Recinto, Cuidador, Vehiculo, IndicadoresSalud, Animal,
     Equipo, Tarea, HabilidadRequerida, Incidente, Sensor, Lectura, Mundo,
     esta_en_nodo, esta_en_arista, obtener_nodo_actual, obtener_arista_actual,
+    ubicacion_en_nodo, nodo_de_ubicacion,
 )
 from .estados import (
     TRANSICIONES_CUIDADOR, TRANSICIONES_ANIMAL, TRANSICIONES_VEHICULO,
@@ -79,6 +80,7 @@ __all__ = [
     "Nodo", "Arista", "Recinto", "Cuidador", "Vehiculo", "IndicadoresSalud", "Animal",
     "Equipo", "Tarea", "HabilidadRequerida", "Incidente", "Sensor", "Lectura", "Mundo",
     "esta_en_nodo", "esta_en_arista", "obtener_nodo_actual", "obtener_arista_actual",
+    "ubicacion_en_nodo", "nodo_de_ubicacion",
     # estados
     "TRANSICIONES_CUIDADOR", "TRANSICIONES_ANIMAL", "TRANSICIONES_VEHICULO",
     "TRANSICIONES_TAREA", "TRANSICIONES_INCIDENTE",

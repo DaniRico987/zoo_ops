@@ -7,7 +7,10 @@ que retorna tupla (violaciones, no_verificadas).
 from dataclasses import dataclass
 from collections import Counter
 from typing import List, Dict, Optional, Tuple
-from zoo_ops.dominio.entidades import Mundo, Animal, Tarea, Recinto, EstadoAnimal, EstadoTarea
+from zoo_ops.dominio.entidades import (
+    Mundo, Animal, Tarea, Recinto, EstadoAnimal, EstadoTarea,
+    nodo_de_ubicacion,
+)
 from zoo_ops.dominio.reservas import (
     RegistroReservas, paquete_de_reservas,
 )
@@ -426,7 +429,7 @@ def _verificar_invariante_13_ubicacion_destino(
             if (
                 cuidador is not None
                 and cuidador.estado == EstadoCuidador.EJECUTANDO
-                and cuidador.ubicacion != (tarea.nodo_destino,)
+                and nodo_de_ubicacion(cuidador.ubicacion) != tarea.nodo_destino
             ):
                 violaciones.append(ViolacionInvariante(
                     invariante="INV-13-ubicacion-destino",

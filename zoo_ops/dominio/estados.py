@@ -18,7 +18,9 @@ from zoo_ops.dominio.enums import (
 from zoo_ops.dominio.errores import (
     DependenciaInexistente, ErrorDominio, TiempoRetrocede, TransicionInvalida,
 )
-from zoo_ops.dominio.entidades import Animal, Incidente, Mundo
+from zoo_ops.dominio.entidades import (
+    Animal, Incidente, Mundo, ubicacion_en_nodo,
+)
 from zoo_ops.dominio.eventos import (
     Evento, TipoEvento, RegistroEventos, aplicar_evento, crear_evento,
 )
@@ -493,7 +495,9 @@ def ejecutar_transicion(
     if "ubicacion" in parametros:
         ubicacion = parametros["ubicacion"]
         datos_extra["ubicacion"] = (
-            (ubicacion,) if entidad_tipo == "Cuidador" else ubicacion
+            ubicacion_en_nodo(ubicacion)
+            if entidad_tipo == "Cuidador"
+            else ubicacion
         )
 
     # 6. Crear evento

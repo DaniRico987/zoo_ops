@@ -289,7 +289,7 @@ class Mundo:
 
 def esta_en_nodo(ubicacion: Tuple) -> bool:
     """Verifica si la ubicación es un nodo simple."""
-    return len(ubicacion) == 1 and isinstance(ubicacion[0], str)
+    return nodo_de_ubicacion(ubicacion) is not None
 
 
 def esta_en_arista(ubicacion: Tuple) -> bool:
@@ -299,13 +299,23 @@ def esta_en_arista(ubicacion: Tuple) -> bool:
 
 def obtener_nodo_actual(ubicacion: Tuple) -> Optional[str]:
     """Obtiene el nodo actual si la ubicación es un nodo, None si está en arista."""
-    if esta_en_nodo(ubicacion):
-        return ubicacion[0]
-    return None
+    return nodo_de_ubicacion(ubicacion)
 
 
 def obtener_arista_actual(ubicacion: Tuple) -> Optional[Tuple[str, str, float]]:
     """Obtiene (origen, destino, progreso) si está en arista."""
     if esta_en_arista(ubicacion):
         return (ubicacion[0], ubicacion[1], float(ubicacion[2]))
+    return None
+
+
+def ubicacion_en_nodo(nodo_id: str) -> Tuple[str]:
+    """Representa la ubicación de un cuidador en un nodo."""
+    return (nodo_id,)
+
+
+def nodo_de_ubicacion(ubicacion: Tuple) -> Optional[str]:
+    """Devuelve el nodo de una ubicación simple, o None si está sobre una arista."""
+    if len(ubicacion) == 1 and isinstance(ubicacion[0], str):
+        return ubicacion[0]
     return None
