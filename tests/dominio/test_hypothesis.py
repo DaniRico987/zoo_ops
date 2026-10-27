@@ -37,6 +37,7 @@ from zoo_ops.dominio.eventos import (
     verificar_reconstruccion,
 )
 from zoo_ops.dominio.invariantes import verificar_invariantes
+from zoo_ops.dominio.operaciones import asignar_plan, desasignar_plan
 from zoo_ops.dominio.plan import PlanEjecucion
 from zoo_ops.dominio.reservas import (
     RegistroReservas, Reserva, TipoRecurso, reservar_atomico,
@@ -264,7 +265,7 @@ def test_orden_determinista_siempre_igual():
 
 class ReconstruccionHonestaMachine(RuleBasedStateMachine):
     """
-    El mundo vivo evoluciona SOLO con `ejecutar_transicion`.
+    El mundo vivo evoluciona mediante operaciones públicas del dominio.
     La reconstrucción parte de una copia profunda del mundo inicial.
     """
 
@@ -281,7 +282,7 @@ class ReconstruccionHonestaMachine(RuleBasedStateMachine):
     def setup(self):
         self.mundo_vivo = Mundo(
             cuidadores={"c1": Cuidador(
-                id="c1", nombre="C", estado=EstadoCuidador.FUERA_DE_TURNO,
+                id="c1", nombre="C", estado=EstadoCuidador.DISPONIBLE,
             )},
             animales={"a1": Animal(
                 id="a1",
@@ -312,17 +313,9 @@ class ReconstruccionHonestaMachine(RuleBasedStateMachine):
                     id="t1", tipo="test", dependencias=frozenset({"t0"}),
                 ),
             },
-            planes={
-                "t1": PlanEjecucion(
-                    tarea_id="t1", cuidadores=("c1",), desde=0, hasta=10000,
-                ),
-            },
         )
         self.registro = RegistroEventos()
         self.registro_reservas = RegistroReservas()
-        self.registro_reservas.agregar_reserva(
-            Reserva(TipoRecurso.CUIDADOR, "c1", "t1", 0, 10000)
-        )
         self.tiempo = 0
         self.paso = 0
         self._mundo_inicial = copy.deepcopy(self.mundo_vivo)
@@ -331,7 +324,19 @@ class ReconstruccionHonestaMachine(RuleBasedStateMachine):
         self.tiempo += 10
         self.paso += 1
 
-    @precondition(lambda self: bool(self.mundo_vivo.cuidadores))
+    @precondition(
+        lambda self: bool(self.mundo_vivo.cuidadores)
+        and not any(
+            tarea.estado in {
+                EstadoTarea.ASIGNADA,
+                EstadoTarea.EN_CURSO,
+                EstadoTarea.PAUSADA,
+            }
+            and (plan := self.mundo_vivo.planes.get(tarea.id)) is not None
+            and "c1" in plan.cuidadores
+            for tarea in self.mundo_vivo.tareas.values()
+        )
+    )
     @rule()
     def transicion_cuidador(self):
         cuidador = self.mundo_vivo.cuidadores["c1"]
@@ -383,14 +388,35 @@ class ReconstruccionHonestaMachine(RuleBasedStateMachine):
         if nuevo == EstadoTarea.ASIGNADA:
             cuidador = self.mundo_vivo.cuidadores.get("c1")
             if cuidador is None or cuidador.estado != EstadoCuidador.DISPONIBLE:
-                destinos = destinos - {EstadoTarea.ASIGNADA}
-                if not destinos:
-                    return
-                nuevo = _elegir_destino(destinos, self.paso)
-        ejecutar_transicion(
-            self.mundo_vivo, self.registro, "Tarea", "t1",
-            nuevo, self.tiempo, "auto",
-        )
+                return
+            plan = PlanEjecucion(
+                tarea_id="t1",
+                cuidadores=("c1",),
+                desde=self.tiempo,
+                hasta=self.tiempo + 10000,
+            )
+            asignar_plan(
+                self.mundo_vivo,
+                self.registro,
+                self.registro_reservas,
+                plan,
+                self.tiempo,
+                "auto",
+            )
+        elif nuevo == EstadoTarea.PENDIENTE and tarea.estado == EstadoTarea.ASIGNADA:
+            desasignar_plan(
+                self.mundo_vivo,
+                self.registro,
+                self.registro_reservas,
+                "t1",
+                self.tiempo,
+                "auto",
+            )
+        else:
+            ejecutar_transicion(
+                self.mundo_vivo, self.registro, "Tarea", "t1",
+                nuevo, self.tiempo, "auto",
+            )
 
     @invariant()
     def reconstruccion_coincide(self):
@@ -418,7 +444,7 @@ TestReconstruccionHonesta.settings = settings(
 
 
 # ============================================================================
-# Secuencias de transiciones (mundo vivo mutado solo por ejecutar_transicion)
+# Secuencias de transiciones y operaciones públicas del dominio
 # ============================================================================
 
 @given(
@@ -531,16 +557,10 @@ def test_secuencia_tarea_con_reserva_y_asignacion(data):
                 id="t1", tipo="test", dependencias=frozenset({"t0"}),
             ),
         },
-        planes={"t1": PlanEjecucion(
-            tarea_id="t1", cuidadores=("c1",), desde=0, hasta=10000,
-        )},
     )
     mundo = copy.deepcopy(inicial)
     registro = RegistroEventos()
     reservas = RegistroReservas()
-    reservas.agregar_reserva(
-        Reserva(TipoRecurso.CUIDADOR, "c1", "t1", 0, 10000)
-    )
     tiempo = 0
 
     for _ in range(data.draw(st.integers(1, 5))):
@@ -550,9 +570,24 @@ def test_secuencia_tarea_con_reserva_y_asignacion(data):
             break
         nuevo = data.draw(st.sampled_from(sorted(destinos, key=lambda e: e.name)))
         tiempo += 10
-        ejecutar_transicion(
-            mundo, registro, "Tarea", "t1", nuevo, tiempo, "secuencia",
-        )
+        if nuevo == EstadoTarea.ASIGNADA:
+            plan = PlanEjecucion(
+                tarea_id="t1",
+                cuidadores=("c1",),
+                desde=tiempo,
+                hasta=tiempo + 10000,
+            )
+            asignar_plan(
+                mundo, registro, reservas, plan, tiempo, "secuencia",
+            )
+        elif nuevo == EstadoTarea.PENDIENTE and actual == EstadoTarea.ASIGNADA:
+            desasignar_plan(
+                mundo, registro, reservas, "t1", tiempo, "secuencia",
+            )
+        else:
+            ejecutar_transicion(
+                mundo, registro, "Tarea", "t1", nuevo, tiempo, "secuencia",
+            )
 
     violaciones, _ = verificar_invariantes(
         mundo, reservas, registro_eventos=registro, estado_inicial=inicial,
@@ -670,7 +705,7 @@ def test_invariantes_4_5_plan_valido_no_produce_violaciones_ni_no_verificadas():
     mundo = Mundo(
         tareas={"t1": tarea},
         cuidadores={
-            "c1": Cuidador("c1", "Test", estado=EstadoCuidador.EJECUTANDO),
+            "c1": Cuidador("c1", "Test", estado=EstadoCuidador.ASIGNADO),
         },
         vehiculos={
             "v1": Vehiculo(
@@ -678,6 +713,7 @@ def test_invariantes_4_5_plan_valido_no_produce_violaciones_ni_no_verificadas():
                 velocidad=5, capacidad_personas=2, capacidad_animales=1,
                 certificacion_requerida=Certificacion.HELICOPTERO,
                 ubicacion="garaje",
+                estado=EstadoVehiculo.RESERVADO,
             ),
         },
         planes={"t1": plan},

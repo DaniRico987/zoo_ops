@@ -14,6 +14,7 @@ from zoo_ops.dominio.invariantes import (
     _verificar_invariante_5_ruta_jeep,
     _verificar_invariante_9_planes_consistentes,
     _verificar_invariante_10_tarea_plan,
+    _verificar_invariante_12_estados_plan,
     _verificar_invariante_6_animal_en_recinto_valido,
     _verificar_invariante_8_dependencias_tarea,
     verificar_invariante_eventos,
@@ -33,6 +34,181 @@ from zoo_ops.dominio.reservas import RegistroReservas, Reserva, TipoRecurso, res
 from zoo_ops.dominio.eventos import RegistroEventos, crear_evento, TipoEvento
 from zoo_ops.dominio.estados import ejecutar_transicion
 from zoo_ops.dominio.plan import PlanEjecucion
+
+
+def _mundo_con_estado_plan(
+    estado_tarea,
+    estado_cuidador,
+    estado_vehiculo,
+):
+    tarea = Tarea(
+        id="t1",
+        tipo="test",
+        estado=estado_tarea,
+        cuidadores_asignados=("c1",),
+    )
+    plan = PlanEjecucion(
+        tarea_id="t1",
+        cuidadores=("c1",),
+        desde=10,
+        hasta=20,
+        vehiculo_id="v1",
+    )
+    return Mundo(
+        tareas={"t1": tarea},
+        cuidadores={
+            "c1": Cuidador("c1", "Test", estado=estado_cuidador),
+        },
+        vehiculos={
+            "v1": Vehiculo(
+                "v1",
+                TipoVehiculo.HELICOPTERO,
+                5,
+                2,
+                1,
+                Certificacion.HELICOPTERO,
+                ubicacion="garaje",
+                estado=estado_vehiculo,
+            ),
+        },
+        planes={"t1": plan},
+    )
+
+
+@pytest.mark.parametrize(
+    ("estado_tarea", "estado_cuidador", "estado_vehiculo"),
+    [
+        (
+            EstadoTarea.ASIGNADA,
+            EstadoCuidador.ASIGNADO,
+            EstadoVehiculo.RESERVADO,
+        ),
+        (
+            EstadoTarea.EN_CURSO,
+            EstadoCuidador.EJECUTANDO,
+            EstadoVehiculo.EN_RUTA,
+        ),
+        (
+            EstadoTarea.PAUSADA,
+            EstadoCuidador.PAUSADO,
+            EstadoVehiculo.EN_USO,
+        ),
+    ],
+)
+def test_inv12_acepta_estados_coherentes_por_estado_de_tarea(
+    estado_tarea,
+    estado_cuidador,
+    estado_vehiculo,
+):
+    mundo = _mundo_con_estado_plan(
+        estado_tarea, estado_cuidador, estado_vehiculo,
+    )
+
+    assert _verificar_invariante_12_estados_plan(mundo) == []
+
+
+@pytest.mark.parametrize(
+    ("estado_tarea", "estado_cuidador", "estado_vehiculo", "tipo_invalido"),
+    [
+        (
+            EstadoTarea.ASIGNADA,
+            EstadoCuidador.DISPONIBLE,
+            EstadoVehiculo.RESERVADO,
+            "Cuidador",
+        ),
+        (
+            EstadoTarea.ASIGNADA,
+            EstadoCuidador.ASIGNADO,
+            EstadoVehiculo.DISPONIBLE,
+            "Vehiculo",
+        ),
+        (
+            EstadoTarea.EN_CURSO,
+            EstadoCuidador.FUERA_DE_TURNO,
+            EstadoVehiculo.EN_RUTA,
+            "Cuidador",
+        ),
+        (
+            EstadoTarea.EN_CURSO,
+            EstadoCuidador.EJECUTANDO,
+            EstadoVehiculo.EN_MANTENIMIENTO,
+            "Vehiculo",
+        ),
+        (
+            EstadoTarea.PAUSADA,
+            EstadoCuidador.DESCANSANDO,
+            EstadoVehiculo.EN_USO,
+            "Cuidador",
+        ),
+        (
+            EstadoTarea.PAUSADA,
+            EstadoCuidador.PAUSADO,
+            EstadoVehiculo.DISPONIBLE,
+            "Vehiculo",
+        ),
+    ],
+)
+def test_inv12_reporta_cada_estado_incoherente(
+    estado_tarea,
+    estado_cuidador,
+    estado_vehiculo,
+    tipo_invalido,
+):
+    mundo = _mundo_con_estado_plan(
+        estado_tarea, estado_cuidador, estado_vehiculo,
+    )
+
+    violaciones = _verificar_invariante_12_estados_plan(mundo)
+
+    assert len(violaciones) == 1
+    assert violaciones[0].entidad_tipo == tipo_invalido
+
+
+def test_inv12_detecta_cuidador_disponible_despues_de_asignacion_directa():
+    mundo = _mundo_con_estado_plan(
+        EstadoTarea.PENDIENTE,
+        EstadoCuidador.DISPONIBLE,
+        EstadoVehiculo.DISPONIBLE,
+    )
+    mundo.eliminar_plan("t1")
+    mundo.registrar_plan(PlanEjecucion(
+        tarea_id="t1",
+        cuidadores=("c1",),
+        desde=10,
+        hasta=20,
+    ))
+    ejecutar_transicion(
+        mundo,
+        RegistroEventos(),
+        "Tarea",
+        "t1",
+        EstadoTarea.ASIGNADA,
+        0,
+        "asignación directa",
+    )
+
+    violaciones = _verificar_invariante_12_estados_plan(mundo)
+
+    assert len(violaciones) == 1
+    assert violaciones[0].entidad_tipo == "Cuidador"
+    assert violaciones[0].entidad_id == "c1"
+
+
+def test_registro_reservas_expone_copias_de_sus_reservas():
+    registro = RegistroReservas()
+    reserva = Reserva(TipoRecurso.CUIDADOR, "c1", "t1", 10, 20)
+    registro.agregar_reserva(reserva)
+
+    todas = registro.todas_las_reservas()
+    por_recurso = registro.reservas_por_recurso()
+    todas.clear()
+    por_recurso[(TipoRecurso.CUIDADOR, "c1")].clear()
+    por_recurso.clear()
+
+    assert registro.todas_las_reservas() == [reserva]
+    assert registro.reservas_por_recurso() == {
+        (TipoRecurso.CUIDADOR, "c1"): [reserva],
+    }
 
 
 class TestInvariante1HabilidadesCuidador:
@@ -222,10 +398,10 @@ class TestInvariante2SolapamientoReservas:
         violaciones = _verificar_invariante_2_solapamiento_reservas(mundo, self.registro)
         assert len(violaciones) == 0
         
-        # Para probar la detección de solapamiento en la invariante,
-        # necesitamos agregar r2 sin validación (simular estado corrupto)
-        # Usamos el registro interno directamente
-        self.registro._reservas_por_recurso[(TipoRecurso.CUIDADOR, "c1")].append(r2)
+        # Restaurar un registro corrupto permite verificar que la invariante lo detecta.
+        self.registro.restaurar({
+            (TipoRecurso.CUIDADOR, "c1"): [r1, r2],
+        })
         violaciones = _verificar_invariante_2_solapamiento_reservas(mundo, self.registro)
         assert len(violaciones) == 1
         assert "Solapamiento" in violaciones[0].detalle

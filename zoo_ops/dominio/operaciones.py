@@ -44,13 +44,14 @@ def registrar_plan_con_evento(
     )
     registro_eventos.validar_anexo(evento)
 
+    plan_existia = plan.tarea_id in mundo.planes
     tiempo_antes = mundo.tiempo_actual
     try:
         aplicar_evento(mundo, evento)
         mundo.tiempo_actual = tiempo
         registro_eventos.anexar(evento)
     except Exception:
-        if plan.tarea_id in mundo.planes:
+        if not plan_existia and plan.tarea_id in mundo.planes:
             mundo.eliminar_plan(plan.tarea_id)
         mundo.tiempo_actual = tiempo_antes
         raise
@@ -96,7 +97,8 @@ def liberar_plan_con_evento(
         mundo.tiempo_actual = tiempo
         registro_eventos.anexar(evento)
     except Exception:
-        mundo.registrar_plan(plan_antes)
+        if tarea_id not in mundo.planes:
+            mundo.registrar_plan(plan_antes)
         mundo.tiempo_actual = tiempo_antes
         raise
     return evento

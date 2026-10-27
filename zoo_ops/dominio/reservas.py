@@ -71,6 +71,20 @@ class RegistroReservas:
         """Devuelve una copia profunda de las reservas por recurso."""
         return copy.deepcopy(self._reservas_por_recurso)
 
+    def todas_las_reservas(self) -> List[Reserva]:
+        """Devuelve copias de todas las reservas del registro."""
+        return copy.deepcopy([
+            reserva
+            for reservas in self._reservas_por_recurso.values()
+            for reserva in reservas
+        ])
+
+    def reservas_por_recurso(
+        self,
+    ) -> Dict[Tuple[TipoRecurso, str], List[Reserva]]:
+        """Devuelve una copia del mapa de reservas por recurso."""
+        return copy.deepcopy(self._reservas_por_recurso)
+
     def restaurar(
         self,
         instantanea: Dict[Tuple[TipoRecurso, str], List[Reserva]],

@@ -20,7 +20,10 @@ from zoo_ops.dominio.eventos import (
     verificar_reconstruccion,
 )
 from zoo_ops.dominio.invariantes import verificar_invariantes
-from zoo_ops.dominio.operaciones import asignar_plan, desasignar_plan
+from zoo_ops.dominio.operaciones import (
+    asignar_plan, desasignar_plan, liberar_plan_con_evento,
+    registrar_plan_con_evento,
+)
 from zoo_ops.dominio.plan import PlanEjecucion
 from zoo_ops.dominio.reservas import RegistroReservas, Reserva, TipoRecurso
 
@@ -273,7 +276,8 @@ def test_desasignar_rechaza_tarea_no_asignada_sin_cambios():
     assert reservas.instantanea() == antes[2]
 
 
-def test_desasignar_plan_revierte_todo_si_falla_anexar():
+@pytest.mark.parametrize("fallo_en", range(1, 7))
+def test_desasignar_plan_revierte_todo_si_falla_anexar(fallo_en):
     mundo = _mundo_pequeno()
     eventos = _fallar_anexo_en(None)
     reservas = RegistroReservas()
@@ -282,15 +286,117 @@ def test_desasignar_plan_revierte_todo_si_falla_anexar():
     eventos_antes = eventos.instantanea()
     mundo_antes = copy.deepcopy(mundo)
     reservas_antes = reservas.instantanea()
-    eventos.llamadas = 0
-    eventos.fallo_en = 6
+    eventos.fallo_en = fallo_en
 
-    with pytest.raises(RuntimeError, match="fallo inyectado 6"):
+    with pytest.raises(RuntimeError, match=f"fallo inyectado {fallo_en}"):
         desasignar_plan(mundo, eventos, reservas, "t1", 6, "fallar")
 
     assert mundo == mundo_antes
     assert eventos.instantanea() == eventos_antes
     assert reservas.instantanea() == reservas_antes
+
+
+def test_desasignar_plan_revierte_todo_si_falla_liberar_reservas(monkeypatch):
+    import zoo_ops.dominio.operaciones as operaciones
+
+    mundo = _mundo_pequeno()
+    eventos = RegistroEventos()
+    reservas = RegistroReservas()
+    asignar_plan(mundo, eventos, reservas, _plan(), 5, "asignar")
+    mundo_antes = copy.deepcopy(mundo)
+    eventos_antes = eventos.instantanea()
+    reservas_antes = reservas.instantanea()
+
+    def fallar_liberacion(*_args):
+        raise RuntimeError("fallo liberando reservas")
+
+    monkeypatch.setattr(operaciones, "liberar_reservas_tarea", fallar_liberacion)
+    with pytest.raises(RuntimeError, match="fallo liberando reservas"):
+        desasignar_plan(mundo, eventos, reservas, "t1", 6, "fallar")
+
+    assert mundo == mundo_antes
+    assert eventos.instantanea() == eventos_antes
+    assert reservas.instantanea() == reservas_antes
+
+
+def test_registrar_plan_con_evento_no_borra_plan_preexistente_si_falla_anexar(
+    monkeypatch,
+):
+    import zoo_ops.dominio.operaciones as operaciones
+
+    mundo = _mundo_pequeno()
+    plan = _plan()
+    mundo.registrar_plan(plan)
+    mundo_antes = copy.deepcopy(mundo)
+
+    class RegistroConFallo(RegistroEventos):
+        def anexar(self, evento):
+            raise RuntimeError("fallo anexando plan")
+
+    monkeypatch.setattr(operaciones, "exigir_plan_valido", lambda *_args: None)
+    monkeypatch.setattr(operaciones, "aplicar_evento", lambda *_args: None)
+    registro = RegistroConFallo()
+    with pytest.raises(RuntimeError, match="fallo anexando plan"):
+        registrar_plan_con_evento(mundo, registro, plan, 5, "fallar")
+
+    assert mundo == mundo_antes
+    assert registro.instantanea() == ([], 1)
+
+
+def test_error_al_aplicar_registro_de_plan_preserva_plan_preexistente(monkeypatch):
+    import zoo_ops.dominio.operaciones as operaciones
+
+    mundo = _mundo_pequeno()
+    plan = _plan()
+    mundo.registrar_plan(plan)
+    mundo_antes = copy.deepcopy(mundo)
+    registro = RegistroEventos()
+
+    monkeypatch.setattr(operaciones, "exigir_plan_valido", lambda *_args: None)
+    with pytest.raises(ErrorDominio):
+        registrar_plan_con_evento(mundo, registro, plan, 5, "duplicado")
+
+    assert mundo == mundo_antes
+    assert registro.obtener_todos() == []
+
+
+def test_liberar_plan_con_evento_restablece_plan_si_falla_anexar():
+    mundo = _mundo_pequeno()
+    plan = _plan()
+    mundo.registrar_plan(plan)
+    mundo_antes = copy.deepcopy(mundo)
+
+    class RegistroConFallo(RegistroEventos):
+        def anexar(self, evento):
+            raise RuntimeError("fallo liberando plan")
+
+    registro = RegistroConFallo()
+    with pytest.raises(RuntimeError, match="fallo liberando plan"):
+        liberar_plan_con_evento(mundo, registro, "t1", 5, "fallar")
+
+    assert mundo == mundo_antes
+    assert registro.instantanea() == ([], 1)
+
+
+def test_error_al_aplicar_liberacion_de_plan_no_se_enmascara(monkeypatch):
+    import zoo_ops.dominio.operaciones as operaciones
+
+    mundo = _mundo_pequeno()
+    mundo.registrar_plan(_plan())
+    mundo_antes = copy.deepcopy(mundo)
+    registro = RegistroEventos()
+    registro_antes = registro.instantanea()
+
+    def fallar_aplicacion(*_args):
+        raise RuntimeError("fallo original aplicando evento")
+
+    monkeypatch.setattr(operaciones, "aplicar_evento", fallar_aplicacion)
+    with pytest.raises(RuntimeError, match="fallo original aplicando evento"):
+        liberar_plan_con_evento(mundo, registro, "t1", 5, "fallar")
+
+    assert mundo == mundo_antes
+    assert registro.obtener_todos() == registro_antes[0]
+    assert registro.instantanea()[1] == registro_antes[1] + 1
 
 
 @given(acciones=st.lists(st.booleans(), min_size=1, max_size=20))

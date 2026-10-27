@@ -13,6 +13,7 @@ from zoo_ops.dominio.reservas import (
 )
 from zoo_ops.dominio.eventos import reconstruir_estado, verificar_reconstruccion, RegistroEventos
 from zoo_ops.dominio.catalogos import ESPECIES_CATALOGO
+from zoo_ops.dominio.enums import EstadoCuidador, EstadoVehiculo
 from zoo_ops.dominio.plan import (
     validar_capacidad_vehiculo, validar_ruta_terrestre,
     cubre_requisitos_cuidadores,
@@ -83,7 +84,7 @@ def _verificar_invariante_2_solapamiento_reservas(
     """
     violaciones = []
     
-    for (recurso_tipo, recurso_id), reservas in registro._reservas_por_recurso.items():
+    for (recurso_tipo, recurso_id), reservas in registro.reservas_por_recurso().items():
         # Verificar pares de reservas
         for i, r1 in enumerate(reservas):
             for r2 in reservas[i+1:]:
@@ -288,6 +289,7 @@ def _verificar_invariante_11_reservas_plan(
     estados_activos = {
         EstadoTarea.ASIGNADA, EstadoTarea.EN_CURSO, EstadoTarea.PAUSADA,
     }
+    todas_las_reservas = registro.todas_las_reservas()
     for tarea in mundo.tareas.values():
         if tarea.estado not in estados_activos:
             continue
@@ -296,9 +298,7 @@ def _verificar_invariante_11_reservas_plan(
             continue
         esperadas = Counter(paquete_de_reservas(plan))
         existentes = Counter(
-            reserva
-            for reservas in registro._reservas_por_recurso.values()
-            for reserva in reservas
+            reserva for reserva in todas_las_reservas
             if reserva.tarea_id == tarea.id
         )
         for reserva, cantidad in (esperadas - existentes).items():
@@ -318,19 +318,87 @@ def _verificar_invariante_11_reservas_plan(
                     detalle=f"Sobra la reserva no prevista {reserva}",
                 ))
 
-    for reservas in registro._reservas_por_recurso.values():
-        for reserva in reservas:
-            if reserva.tarea_id not in mundo.tareas:
+    for reserva in todas_las_reservas:
+        if reserva.tarea_id not in mundo.tareas:
+            violaciones.append(ViolacionInvariante(
+                invariante="INV-11-reservas-plan",
+                entidad_tipo="Reserva",
+                entidad_id=reserva.recurso_id,
+                detalle=(
+                    f"La reserva de {reserva.recurso_tipo.name}:"
+                    f"{reserva.recurso_id} referencia la tarea inexistente "
+                    f"{reserva.tarea_id}"
+                ),
+            ))
+    return violaciones
+
+
+def _verificar_invariante_12_estados_plan(
+    mundo: Mundo,
+) -> List[ViolacionInvariante]:
+    """Comprueba que los estados de los recursos concuerdan con la tarea."""
+    violaciones = []
+    estados_activos = {
+        EstadoTarea.ASIGNADA, EstadoTarea.EN_CURSO, EstadoTarea.PAUSADA,
+    }
+    estados_cuidador_no_validos = {
+        EstadoCuidador.DISPONIBLE,
+        EstadoCuidador.DESCANSANDO,
+        EstadoCuidador.FUERA_DE_TURNO,
+    }
+
+    for tarea in mundo.tareas.values():
+        if tarea.estado not in estados_activos:
+            continue
+        plan = mundo.planes.get(tarea.id)
+        if plan is None:
+            continue
+
+        for cuidador_id in plan.cuidadores:
+            cuidador = mundo.cuidadores.get(cuidador_id)
+            if cuidador is None:
+                continue
+            estado_invalido = (
+                cuidador.estado != EstadoCuidador.ASIGNADO
+                if tarea.estado == EstadoTarea.ASIGNADA
+                else cuidador.estado in estados_cuidador_no_validos
+            )
+            if estado_invalido:
                 violaciones.append(ViolacionInvariante(
-                    invariante="INV-11-reservas-plan",
-                    entidad_tipo="Reserva",
-                    entidad_id=reserva.recurso_id,
+                    invariante="INV-12-estados-plan",
+                    entidad_tipo="Cuidador",
+                    entidad_id=cuidador_id,
                     detalle=(
-                        f"La reserva de {reserva.recurso_tipo.name}:"
-                        f"{reserva.recurso_id} referencia la tarea inexistente "
-                        f"{reserva.tarea_id}"
+                        f"El cuidador del plan de {tarea.id} está "
+                        f"{cuidador.estado.name}, incompatible con "
+                        f"la tarea {tarea.estado.name}"
                     ),
                 ))
+
+        if plan.vehiculo_id is None:
+            continue
+        vehiculo = mundo.vehiculos.get(plan.vehiculo_id)
+        if vehiculo is None:
+            continue
+        estado_vehiculo_invalido = (
+            vehiculo.estado != EstadoVehiculo.RESERVADO
+            if tarea.estado == EstadoTarea.ASIGNADA
+            else vehiculo.estado in {
+                EstadoVehiculo.DISPONIBLE,
+                EstadoVehiculo.EN_MANTENIMIENTO,
+            }
+        )
+        if estado_vehiculo_invalido:
+            violaciones.append(ViolacionInvariante(
+                invariante="INV-12-estados-plan",
+                entidad_tipo="Vehiculo",
+                entidad_id=plan.vehiculo_id,
+                detalle=(
+                    f"El vehículo del plan de {tarea.id} está "
+                    f"{vehiculo.estado.name}, incompatible con "
+                    f"la tarea {tarea.estado.name}"
+                ),
+            ))
     return violaciones
 
 
@@ -524,6 +592,9 @@ def verificar_invariantes(
     todas_violaciones.extend(
         _verificar_invariante_11_reservas_plan(mundo, registro)
     )
+
+    # Invariante 12: Estados de cuidadores y vehículos según el plan.
+    todas_violaciones.extend(_verificar_invariante_12_estados_plan(mundo))
     
     return todas_violaciones, no_verificadas
 

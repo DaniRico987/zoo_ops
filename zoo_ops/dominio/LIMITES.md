@@ -14,7 +14,7 @@
 
 **Mutación y `reconstruir_estado`**: `aplicar_evento` muta el `Mundo` recibido. Por eso `reconstruir_estado` parte de `copy.deepcopy(estado_inicial)`; el llamador conserva el mundo inicial intacto, pero debe saber que el mundo devuelto es una copia nueva, no el mismo objeto.
 
-**Instantáneas y restauración**: `Mundo`, `RegistroEventos` y `RegistroReservas` crean instantáneas profundas y restauran el contenido sobre la misma instancia. El coste de copiar y restaurar es proporcional al tamaño del mundo y sus registros.
+**Instantáneas y restauración**: `Mundo`, `RegistroEventos` y `RegistroReservas` crean instantáneas profundas y restauran el contenido sobre la misma instancia. El coste de copiar y restaurar es proporcional al tamaño del mundo y sus registros. `Mundo.restaurar` reemplaza sus diccionarios internos; las referencias externas a colecciones como `mundo.cuidadores` quedan obsoletas después de una reversión.
 
 ## (b) INV-4, INV-5, INV-7 e INV-10
 
@@ -22,7 +22,9 @@
 
 **INV-10 (tarea-plan)** exige que toda tarea activa tenga un plan y que los cuidadores asignados coincidan con los del plan. La ausencia de plan es una violación de INV-10, no una condición no verificada de INV-4 o INV-5.
 
-**INV-11 (reservas-plan)** compara exactamente las reservas de cada tarea activa con plan y detecta reservas asociadas a tareas inexistentes. Las reservas de una operación compuesta se revierten junto con el mundo y los eventos si falla cualquier paso.
+**INV-11 (reservas-plan)** compara exactamente las reservas de cada tarea activa con plan y detecta reservas asociadas a tareas inexistentes. Las reservas de `asignar_plan` no generan eventos y no se pueden reconstruir desde la bitácora; INV-11 las contrasta con el registro de reservas. Las reservas de una operación compuesta se revierten junto con el mundo y los eventos si falla cualquier paso.
+
+**INV-12 (estados-plan)** verifica la coherencia de los estados de cuidadores y vehículos del plan según la tarea esté `ASIGNADA`, `EN_CURSO` o `PAUSADA`. Las referencias inexistentes se informan mediante INV-9.
 
 **INV-7 (mundo vivo == reconstruido)**: `verificar_invariantes` solo puede comprobarla si el llamador aporta el estado inicial (`estado_inicial=`); el estado inicial no puede inferirse del estado vivo. Si se pasa `registro_eventos` sin `estado_inicial`, INV-7 aparece en `no_verificadas` en lugar de dar un resultado falso.
 
