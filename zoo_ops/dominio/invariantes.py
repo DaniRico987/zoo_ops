@@ -196,7 +196,12 @@ def _verificar_invariante_5_ruta_jeep(mundo: Mundo) -> List[ViolacionInvariante]
                 detalle=f"El vehículo {plan.vehiculo_id} no existe",
             ))
             continue
-        for error in validar_ruta_terrestre(mundo, tarea, plan):
+        for error in validar_ruta_terrestre(
+            mundo,
+            tarea,
+            plan,
+            verificar_origen=tarea.estado == EstadoTarea.ASIGNADA,
+        ):
             violaciones.append(ViolacionInvariante(
                 invariante="INV-5-jeep-aristas-validas",
                 entidad_tipo="PlanEjecucion",
@@ -402,6 +407,56 @@ def _verificar_invariante_12_estados_plan(
     return violaciones
 
 
+def _verificar_invariante_13_ubicacion_destino(
+    mundo: Mundo,
+) -> List[ViolacionInvariante]:
+    """Comprueba ubicaciones al ejecutar en destino según el plan."""
+    violaciones = []
+    estados_activos = {
+        EstadoTarea.ASIGNADA, EstadoTarea.EN_CURSO, EstadoTarea.PAUSADA,
+    }
+    for tarea in mundo.tareas.values():
+        if tarea.estado not in estados_activos:
+            continue
+        plan = mundo.planes.get(tarea.id)
+        if plan is None:
+            continue
+        for cuidador_id in plan.cuidadores:
+            cuidador = mundo.cuidadores.get(cuidador_id)
+            if (
+                cuidador is not None
+                and cuidador.estado == EstadoCuidador.EJECUTANDO
+                and cuidador.ubicacion != (tarea.nodo_destino,)
+            ):
+                violaciones.append(ViolacionInvariante(
+                    invariante="INV-13-ubicacion-destino",
+                    entidad_tipo="Cuidador",
+                    entidad_id=cuidador_id,
+                    detalle=(
+                        f"El cuidador está en {cuidador.ubicacion}, no en "
+                        f"el destino {tarea.nodo_destino} de la tarea {tarea.id}"
+                    ),
+                ))
+        if plan.vehiculo_id is None:
+            continue
+        vehiculo = mundo.vehiculos.get(plan.vehiculo_id)
+        if (
+            vehiculo is not None
+            and vehiculo.estado == EstadoVehiculo.EN_USO
+            and vehiculo.ubicacion != tarea.nodo_destino
+        ):
+            violaciones.append(ViolacionInvariante(
+                invariante="INV-13-ubicacion-destino",
+                entidad_tipo="Vehiculo",
+                entidad_id=plan.vehiculo_id,
+                detalle=(
+                    f"El vehículo está en {vehiculo.ubicacion}, no en el "
+                    f"destino {tarea.nodo_destino} de la tarea {tarea.id}"
+                ),
+            ))
+    return violaciones
+
+
 # ============================================================================
 # Invariante 6: Animal en recinto que admite su especie
 # ============================================================================
@@ -595,6 +650,11 @@ def verificar_invariantes(
 
     # Invariante 12: Estados de cuidadores y vehículos según el plan.
     todas_violaciones.extend(_verificar_invariante_12_estados_plan(mundo))
+
+    # Invariante 13: La ejecución activa ocurre en el nodo de destino.
+    todas_violaciones.extend(
+        _verificar_invariante_13_ubicacion_destino(mundo)
+    )
     
     return todas_violaciones, no_verificadas
 

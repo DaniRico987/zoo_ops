@@ -437,6 +437,16 @@ def ejecutar_transicion(
         )
 
     _exigir_parametros(entidad_tipo, estado_nuevo, parametros)
+    if "ubicacion" in parametros:
+        if entidad_tipo not in {"Cuidador", "Vehiculo"}:
+            raise ErrorDominio(
+                f"El parámetro ubicacion no es válido para {entidad_tipo}"
+            )
+        ubicacion = parametros["ubicacion"]
+        if not isinstance(ubicacion, str) or not ubicacion:
+            raise ErrorDominio("ubicacion debe ser el ID no vacío de un nodo")
+        if ubicacion not in mundo.nodos:
+            raise ErrorDominio(f"El nodo {ubicacion} de ubicacion no existe")
     if (
         entidad_tipo == "Tarea"
         and estado_nuevo == EstadoTarea.ASIGNADA
@@ -480,6 +490,11 @@ def ejecutar_transicion(
             datos_extra = datos_extra_builder(entidad, estado_nuevo, parametros, mundo)
         else:
             datos_extra = datos_extra_builder(entidad, estado_nuevo, parametros)
+    if "ubicacion" in parametros:
+        ubicacion = parametros["ubicacion"]
+        datos_extra["ubicacion"] = (
+            (ubicacion,) if entidad_tipo == "Cuidador" else ubicacion
+        )
 
     # 6. Crear evento
     evento = crear_evento(

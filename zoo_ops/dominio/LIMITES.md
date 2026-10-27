@@ -26,21 +26,22 @@
 
 **INV-12 (estados-plan)** verifica la coherencia de los estados de cuidadores y vehículos del plan según la tarea esté `ASIGNADA`, `EN_CURSO` o `PAUSADA`. Las referencias inexistentes se informan mediante INV-9.
 
+**INV-13 (ubicación-destino)** exige que cada cuidador en `EJECUTANDO` y cada vehículo en `EN_USO` de una tarea activa con plan estén en el nodo de destino de la tarea.
+
 **INV-7 (mundo vivo == reconstruido)**: `verificar_invariantes` solo puede comprobarla si el llamador aporta el estado inicial (`estado_inicial=`); el estado inicial no puede inferirse del estado vivo. Si se pasa `registro_eventos` sin `estado_inicial`, INV-7 aparece en `no_verificadas` en lugar de dar un resultado falso.
 
 **Simplificación del plan**: se asume que todo el equipo de cuidadores viaja en el vehículo seleccionado. La ruta terrestre comienza en la ubicación actual del vehículo y no incluye un tramo de recogida de cuidadores. `MedioPermitido.JEEP` representa la red vial utilizada por cualquier vehículo terrestre, incluido el camión; el helicóptero no requiere ruta.
 
 ## (c) Cambios de entidad que NO generan evento (no reconstruibles)
 
-`CAMBIO_ESTADO` escribe campos de entidad únicamente en `Cuidador`, `Animal`, `Vehiculo`, `Tarea` e `Incidente`. Además de `estado`, solo escribe `ubicacion` (Animal) y `cuidadores_asignados` (Tarea; el evento usa `cuidadores_ids`). `PLAN_REGISTRADO` y `PLAN_LIBERADO` modifican `Mundo.planes`. Todo lo demás que cambie fuera de esos eventos no es reproducible por `reconstruir_estado`:
+`CAMBIO_ESTADO` escribe campos de entidad únicamente en `Cuidador`, `Animal`, `Vehiculo`, `Tarea` e `Incidente`. Además de `estado`, escribe `ubicacion` para Animal, Cuidador y Vehiculo, y `cuidadores_asignados` para Tarea (el evento usa `cuidadores_ids`). `PLAN_REGISTRADO` y `PLAN_LIBERADO` modifican `Mundo.planes`. Todo lo demás que cambie fuera de esos eventos no es reproducible por `reconstruir_estado`:
 
 | Entidad | Campo(s) no reconstruible(s) | Motivo |
 |---------|------------------------------|--------|
-| Cuidador | `ubicacion`, `fatiga` | Movimiento y simulación continua; no hay evento de movimiento |
+| Cuidador | `fatiga` | Simulación continua; no hay evento para actualizarla |
 | Cuidador | `nombre`, `habilidades`, `certificaciones`, `velocidad_base`, `turno` | Datos estáticos; si se mutan directamente, no hay evento |
 | Animal | `ubicacion` salvo transición a `EN_RECINTO` | El movimiento por nodos/aristas no genera evento |
 | Animal | `salud` (peso, consumo, actividad), `recinto_origen`, `especie` | Salud continua y datos estáticos |
-| Vehiculo | `ubicacion` | Movimiento no genera evento `CAMBIO_ESTADO` |
 | Vehiculo | `tipo`, `velocidad`, `capacidad_personas`, `capacidad_animales`, `certificacion_requerida` | Datos estáticos |
 | Equipo | `estado`, `ubicacion`, `tipo` | `aplicar_evento` no soporta `CAMBIO_ESTADO` para `Equipo` |
 | Tarea | `cuidadores_asignados` fuera de `ASIGNADA` / vuelta a `PENDIENTE` | Solo esas transiciones lo escriben |
@@ -53,7 +54,7 @@
 | Sensor | Todos sus campos | No hay eventos de sensor; solo `LECTURA_SENSOR` añade lecturas |
 | Mundo | `lecturas` (solo por `LECTURA_SENSOR`), `tiempo_actual` (se fija al `momento` del evento) | El resto de colecciones solo cambia por creación/eliminación, que no se reconstruyen |
 
-**Campos extra sí reproducibles**: `Animal.ubicacion` cuando la transición es `EN_RECINTO` (vía `recinto_destino`) y `Tarea.cuidadores_asignados` en `ASIGNADA` / `PENDIENTE` (vía `datos_extra["cuidadores_ids"]`). Son los únicos campos que un `CAMBIO_ESTADO` escribe además de `estado`.
+**Campos extra sí reproducibles**: `Animal.ubicacion` al pasar a `EN_RECINTO` (vía `recinto_destino`), `Cuidador.ubicacion` (representada como tupla de nodo, por ejemplo `("n1",)`), `Vehiculo.ubicacion` (ID de nodo) y `Tarea.cuidadores_asignados` en `ASIGNADA` / `PENDIENTE` (vía `datos_extra["cuidadores_ids"]`). Las ubicaciones de cuidadores y vehículos se actualizan por las operaciones del ciclo al llegar al destino.
 
 **Vías de asignación**: `asignar_plan` y `desasignar_plan` son las operaciones compuestas previstas y restauran mundo, eventos (incluido el contador de IDs) y reservas ante cualquier excepción. `ejecutar_transicion` a `ASIGNADA` sigue disponible directamente y exige que el plan ya exista; no cambia el estado de cuidadores ni vehículo, por lo que INV-11 detecta las reservas que falten.
 
@@ -71,6 +72,8 @@
 
 `reconstruir_estado` **rechaza** con `EventoNoSoportado` los cinco tipos de la última lista (`EVENTOS_NO_RECONSTRUIBLES`). Los eventos de plan se reproducen con `aplicar_evento`. No hay parámetro `aplicadores`: la reconstrucción no admite lógica personalizada, precisamente para que no existan dos verdades.
 
+**Salida, llegada e interpolación**: el inicio de ejecución y la llegada al destino quedan registrados mediante eventos de cambio de estado. No se generan eventos para el movimiento intermedio: el frontend interpola el desplazamiento sobre `plan.ruta` entre los instantes de salida y llegada. El plan y la ruta se conservan; `INV-5` solo compara el origen de la ruta mientras la tarea está `ASIGNADA`, no cuando ya está `EN_CURSO` o `PAUSADA`.
+
 **El tiempo se fija al momento del último evento aplicado** (`mundo.tiempo_actual = evento.momento`), no se incrementa.
 
 `RegistroEventos.anexar` rechaza eventos con un ID ya presente mediante `EventoDuplicado` y mantiene `_ultimo_id_evento` al menos en el máximo ID anexado. `siguiente_id_evento` incrementa ese contador, así que crear un evento tras anexar manualmente el ID 5 produce el ID 6. `ejecutar_transicion` valida esa condición antes de mutar el mundo y revierte entidad y reloj si el anexo falla por otra causa.
@@ -85,7 +88,9 @@
 
 `PlanEjecucion` exige cuidadores no vacíos y únicos, IDs de equipo y animales únicos, y `hasta > desde`; `desde` y `hasta` son obligatorios. El vehículo y los equipos concretos son opcionales cuando la tarea no los requiere; los requisitos se expresan mediante `vehiculo_requerido` y `equipos_requeridos`. Los requisitos repetidos de un tipo de equipo representan una cantidad mínima. Los animales transportados deben existir y requieren vehículo.
 
-`asignar_plan` cambia a `ASIGNADO` a los cuidadores y a `RESERVADO` al vehículo, si existe. Los equipos no cambian de estado: siguen `DISPONIBLE` y solo se reservan por intervalo. `desasignar_plan` revierte estados y reservas solo antes de iniciar la tarea. El inicio y cierre de ejecución (`EN_CAMINO`, `EJECUTANDO`, `COMPLETADA`) quedan fuera de esta entrega.
+`asignar_plan` cambia a `ASIGNADO` a los cuidadores y a `RESERVADO` al vehículo, si existe. `iniciar_ejecucion` mueve la tarea a `EN_CURSO`, a los cuidadores a `EN_CAMINO` y al vehículo a `EN_RUTA`. `llegar_a_destino` mueve cuidadores y vehículo a sus estados de ejecución y actualiza sus ubicaciones al nodo destino; la tarea permanece `EN_CURSO`. `completar_plan` y `fallar_plan` liberan recursos y reservas, pero conservan el plan como historial. Los equipos no cambian de estado: siguen `DISPONIBLE` y solo se reservan por intervalo.
+
+El inicio no cambia estados de animales; los efectos sobre animales de cada tipo de tarea se modelarán con los incidentes. No se modelan pausa ni aborto en tránsito. Las ubicaciones de cuidadores y vehículos solo cambian a la llegada dentro de estas operaciones. El reloj de todos los eventos de una operación compuesta es el mismo y no puede retroceder.
 
 La transición `ASIGNADO -> DISPONIBLE` de cuidador está permitida para revertir una asignación antes de salir hacia la tarea.
 
@@ -101,3 +106,4 @@ La transición `ASIGNADO -> DISPONIBLE` de cuidador está permitida para reverti
 8. **Reconstrucción de `CREACION_ENTIDAD`**: para reconstruir desde un mundo vacío haría falta una factoría por tipo de entidad. Hoy se parte de un mundo inicial que ya contiene las entidades.
 9. **Vínculo del incidente con el animal**: se reutiliza `Incidente.animal_relacionado` en lugar de añadir un campo `animal_id` duplicado. No se valida al crear el incidente; al cerrar un incidente de escape se exige que exista y que el animal esté `EN_RECINTO`. Pendiente decidir si la obligatoriedad debe imponerse también en la creación.
 10. **Tareas del incidente**: para cerrar se considera la unión sin duplicados de `Incidente.tareas_generadas` y las tareas cuyo `incidente_origen` coincide con el ID del incidente.
+11. **Aborto en tránsito**: volver a liberar cuidadores o vehículos durante el desplazamiento requeriría las transiciones `EN_CAMINO -> DISPONIBLE` y `EN_RUTA -> DISPONIBLE`; no se añaden en esta entrega, a la espera del diseño de preempción.

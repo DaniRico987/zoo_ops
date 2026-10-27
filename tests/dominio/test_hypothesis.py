@@ -363,7 +363,19 @@ class ReconstruccionHonestaMachine(RuleBasedStateMachine):
             recinto_destino="rec1",
         )
 
-    @precondition(lambda self: bool(self.mundo_vivo.vehiculos))
+    @precondition(
+        lambda self: bool(self.mundo_vivo.vehiculos)
+        and not any(
+            tarea.estado in {
+                EstadoTarea.ASIGNADA,
+                EstadoTarea.EN_CURSO,
+                EstadoTarea.PAUSADA,
+            }
+            and (plan := self.mundo_vivo.planes.get(tarea.id)) is not None
+            and plan.vehiculo_id == "v1"
+            for tarea in self.mundo_vivo.tareas.values()
+        )
+    )
     @rule()
     def transicion_vehiculo(self):
         vehiculo = self.mundo_vivo.vehiculos["v1"]

@@ -115,6 +115,75 @@ class TestTablasDeTransiciones:
         assert TRANSICIONES_INCIDENTE[EstadoIncidente.CERRADO] == frozenset()
 
 
+class TestUbicacionesEnTransiciones:
+    def test_ubicaciones_de_cuidador_y_vehiculo_se_reconstruyen(self):
+        from zoo_ops.dominio.eventos import reconstruir_estado, verificar_reconstruccion
+        from zoo_ops.dominio.entidades import Nodo
+        from zoo_ops.dominio.enums import TipoNodo
+
+        inicial = Mundo(
+            cuidadores={
+                "c1": Cuidador(
+                    "c1", "C", estado=EstadoCuidador.ASIGNADO,
+                    ubicacion=("origen",),
+                ),
+            },
+            vehiculos={"v1": _vehiculo(EstadoVehiculo.RESERVADO)},
+            nodos={
+                "origen": Nodo("origen", TipoNodo.GARAJE, 0, 0),
+                "destino": Nodo("destino", TipoNodo.RECINTO, 1, 1),
+            },
+        )
+        mundo = copy.deepcopy(inicial)
+        registro = RegistroEventos()
+        ejecutar_transicion(
+            mundo, registro, "Cuidador", "c1",
+            EstadoCuidador.EN_CAMINO, 1, "salida",
+        )
+        ejecutar_transicion(
+            mundo, registro, "Vehiculo", "v1",
+            EstadoVehiculo.EN_RUTA, 1, "salida",
+        )
+        evento_cuidador = ejecutar_transicion(
+            mundo, registro, "Cuidador", "c1",
+            EstadoCuidador.EJECUTANDO, 2, "llegada", ubicacion="destino",
+        )
+        evento_vehiculo = ejecutar_transicion(
+            mundo, registro, "Vehiculo", "v1",
+            EstadoVehiculo.EN_USO, 2, "llegada", ubicacion="destino",
+        )
+
+        assert evento_cuidador.datos_extra["ubicacion"] == ("destino",)
+        assert evento_vehiculo.datos_extra["ubicacion"] == "destino"
+        reconstruido = reconstruir_estado(registro.obtener_todos(), inicial)
+        assert verificar_reconstruccion(mundo, reconstruido) == []
+
+    @pytest.mark.parametrize("entidad_tipo", ["Cuidador", "Vehiculo"])
+    def test_ubicacion_con_nodo_inexistente_no_muta(self, entidad_tipo):
+        if entidad_tipo == "Cuidador":
+            mundo = Mundo(
+                cuidadores={"c1": _cuidador(EstadoCuidador.ASIGNADO)},
+            )
+            entidad_id = "c1"
+            estado = EstadoCuidador.EN_CAMINO
+        else:
+            mundo = Mundo(vehiculos={"v1": _vehiculo(EstadoVehiculo.RESERVADO)})
+            entidad_id = "v1"
+            estado = EstadoVehiculo.EN_RUTA
+        mundo_antes = copy.deepcopy(mundo)
+        registro = RegistroEventos()
+        eventos_antes = registro.instantanea()
+
+        with pytest.raises(ErrorDominio, match="nodo .* no existe"):
+            ejecutar_transicion(
+                mundo, registro, entidad_tipo, entidad_id, estado,
+                1, "ubicación inválida", ubicacion="ausente",
+            )
+
+        assert mundo == mundo_antes
+        assert registro.instantanea() == eventos_antes
+
+
 # ============================================================================
 # Cuidador
 # ============================================================================

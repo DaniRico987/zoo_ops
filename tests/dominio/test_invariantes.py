@@ -557,6 +557,28 @@ class TestInvariante5RutaJeepPlan:
     def test_ruta_jeep_valida_no_viola(self):
         assert _verificar_invariante_5_ruta_jeep(self._mundo()) == []
 
+    def test_inv5_compara_origen_asignada_pero_no_durante_la_marcha(self):
+        mundo = self._mundo()
+        registro = RegistroEventos()
+        ejecutar_transicion(
+            mundo, registro, "Vehiculo", "v1",
+            EstadoVehiculo.RESERVADO, 1, "reservar",
+        )
+        ejecutar_transicion(
+            mundo, registro, "Vehiculo", "v1",
+            EstadoVehiculo.EN_RUTA, 2, "mover",
+            ubicacion="destino",
+        )
+
+        assert len(_verificar_invariante_5_ruta_jeep(mundo)) == 1
+
+        ejecutar_transicion(
+            mundo, registro, "Tarea", "t1",
+            EstadoTarea.EN_CURSO, 3, "iniciar",
+        )
+
+        assert _verificar_invariante_5_ruta_jeep(mundo) == []
+
     def test_ruta_camion_bloqueada_produce_violacion(self):
         tarea = Tarea(
             id="t1", tipo="traslado", nodo_destino="destino",

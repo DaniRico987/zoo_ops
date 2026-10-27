@@ -51,7 +51,8 @@ from .plan import (
 )
 from .operaciones import (
     registrar_plan_con_evento, liberar_plan_con_evento,
-    asignar_plan, desasignar_plan,
+    asignar_plan, desasignar_plan, iniciar_ejecucion, llegar_a_destino,
+    completar_plan, fallar_plan,
 )
 from .invariantes import (
     verificar_invariantes, ViolacionInvariante, NoVerificada,
@@ -97,6 +98,7 @@ __all__ = [
     "validar_capacidad_vehiculo", "validar_ruta_terrestre", "validar_plan",
     "exigir_plan_valido", "registrar_plan_con_evento",
     "liberar_plan_con_evento", "asignar_plan", "desasignar_plan",
+    "iniciar_ejecucion", "llegar_a_destino", "completar_plan", "fallar_plan",
     # invariantes
     "verificar_invariantes", "ViolacionInvariante", "NoVerificada",
     "formatear_violaciones", "formatear_no_verificadas", "assert_sin_violaciones",

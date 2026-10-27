@@ -22,7 +22,7 @@ from zoo_ops.dominio.eventos import (
 )
 from zoo_ops.dominio.plan import (
     PlanEjecucion, cubre_requisitos_cuidadores, exigir_plan_valido,
-    validar_plan,
+    validar_plan, validar_ruta_terrestre,
 )
 from zoo_ops.dominio.operaciones import (
     liberar_plan_con_evento, registrar_plan_con_evento,
@@ -193,6 +193,22 @@ class TestValidarPlan:
 
         assert validar_plan(mundo, _plan()) == []
         assert mundo == antes
+
+    def test_validacion_de_ruta_permita_ignorar_origen_en_marcha(self):
+        mundo = _mundo(vehiculos={
+            "v1": _vehiculo(
+                estado=EstadoVehiculo.EN_RUTA,
+                ubicacion="destino",
+            ),
+        })
+
+        assert any(
+            "debe empezar en" in error
+            for error in validar_ruta_terrestre(mundo, mundo.tareas["t1"], _plan())
+        )
+        assert validar_ruta_terrestre(
+            mundo, mundo.tareas["t1"], _plan(), verificar_origen=False,
+        ) == []
 
     def test_plan_duplicado_se_rechaza(self):
         mundo = _mundo()

@@ -1,8 +1,8 @@
 """Operaciones compuestas de asignación, desasignación y ciclo de planes."""
 
-from typing import List
+from typing import Callable, List, Tuple
 
-from zoo_ops.dominio.entidades import Mundo
+from zoo_ops.dominio.entidades import Mundo, Tarea
 from zoo_ops.dominio.enums import (
     EstadoCuidador, EstadoTarea, EstadoVehiculo,
 )
@@ -200,3 +200,224 @@ def desasignar_plan(
         registro_reservas.restaurar(reservas_antes)
         raise
     return eventos
+
+
+def _exigir_tarea_y_plan(
+    mundo: Mundo,
+    tarea_id: str,
+    estado_requerido: EstadoTarea,
+) -> Tuple[Tarea, PlanEjecucion]:
+    tarea = mundo.tareas.get(tarea_id)
+    if tarea is None:
+        raise ErrorDominio(f"La tarea {tarea_id} no existe en el mundo")
+    if tarea.estado != estado_requerido:
+        raise ErrorDominio(
+            f"La tarea {tarea_id} debe estar {estado_requerido.name}; "
+            f"está {tarea.estado.name}"
+        )
+    plan = mundo.planes.get(tarea_id)
+    if plan is None:
+        raise ErrorDominio(f"La tarea {tarea_id} no tiene un plan registrado")
+    return tarea, plan
+
+
+def _exigir_estado_recursos(
+    mundo: Mundo,
+    plan: PlanEjecucion,
+    estado_cuidador: EstadoCuidador,
+    estado_vehiculo: EstadoVehiculo,
+) -> None:
+    for cuidador_id in plan.cuidadores:
+        cuidador = mundo.cuidadores.get(cuidador_id)
+        if cuidador is None:
+            raise ErrorDominio(f"El cuidador {cuidador_id} no existe en el mundo")
+        if cuidador.estado != estado_cuidador:
+            raise ErrorDominio(
+                f"El cuidador {cuidador_id} debe estar {estado_cuidador.name}; "
+                f"está {cuidador.estado.name}"
+            )
+    if plan.vehiculo_id is not None:
+        vehiculo = mundo.vehiculos.get(plan.vehiculo_id)
+        if vehiculo is None:
+            raise ErrorDominio(
+                f"El vehículo {plan.vehiculo_id} no existe en el mundo"
+            )
+        if vehiculo.estado != estado_vehiculo:
+            raise ErrorDominio(
+                f"El vehículo {plan.vehiculo_id} debe estar "
+                f"{estado_vehiculo.name}; está {vehiculo.estado.name}"
+            )
+
+
+def _exigir_reloj_monotono(mundo: Mundo, tiempo: int) -> None:
+    if tiempo < mundo.tiempo_actual:
+        raise TiempoRetrocede(mundo.tiempo_actual, tiempo)
+
+
+def _ejecutar_con_reversion(
+    mundo: Mundo,
+    registro_eventos: RegistroEventos,
+    registro_reservas: RegistroReservas,
+    accion: Callable[[], List[Evento]],
+) -> List[Evento]:
+    mundo_antes = mundo.instantanea()
+    eventos_antes = registro_eventos.instantanea()
+    reservas_antes = registro_reservas.instantanea()
+    try:
+        return accion()
+    except Exception:
+        mundo.restaurar(mundo_antes)
+        registro_eventos.restaurar(eventos_antes)
+        registro_reservas.restaurar(reservas_antes)
+        raise
+
+
+def iniciar_ejecucion(
+    mundo: Mundo,
+    registro_eventos: RegistroEventos,
+    registro_reservas: RegistroReservas,
+    tarea_id: str,
+    tiempo: int,
+    causa: str,
+) -> List[Evento]:
+    """Inicia el desplazamiento de los recursos asignados a una tarea."""
+    tarea, plan = _exigir_tarea_y_plan(
+        mundo, tarea_id, EstadoTarea.ASIGNADA,
+    )
+    _exigir_reloj_monotono(mundo, tiempo)
+    if not plan.desde <= tiempo < plan.hasta:
+        raise ErrorDominio(
+            f"El inicio debe ocurrir en la ventana [{plan.desde}, {plan.hasta})"
+        )
+    _exigir_estado_recursos(
+        mundo, plan, EstadoCuidador.ASIGNADO, EstadoVehiculo.RESERVADO,
+    )
+
+    def iniciar() -> List[Evento]:
+        eventos = [ejecutar_transicion(
+            mundo, registro_eventos, "Tarea", tarea.id,
+            EstadoTarea.EN_CURSO, tiempo, causa,
+        )]
+        for cuidador_id in plan.cuidadores:
+            eventos.append(ejecutar_transicion(
+                mundo, registro_eventos, "Cuidador", cuidador_id,
+                EstadoCuidador.EN_CAMINO, tiempo, causa,
+            ))
+        if plan.vehiculo_id is not None:
+            eventos.append(ejecutar_transicion(
+                mundo, registro_eventos, "Vehiculo", plan.vehiculo_id,
+                EstadoVehiculo.EN_RUTA, tiempo, causa,
+            ))
+        return eventos
+
+    return _ejecutar_con_reversion(
+        mundo, registro_eventos, registro_reservas, iniciar,
+    )
+
+
+def llegar_a_destino(
+    mundo: Mundo,
+    registro_eventos: RegistroEventos,
+    registro_reservas: RegistroReservas,
+    tarea_id: str,
+    tiempo: int,
+    causa: str,
+) -> List[Evento]:
+    """Registra la llegada y sitúa los recursos en el destino de la tarea."""
+    tarea, plan = _exigir_tarea_y_plan(
+        mundo, tarea_id, EstadoTarea.EN_CURSO,
+    )
+    _exigir_reloj_monotono(mundo, tiempo)
+    _exigir_estado_recursos(
+        mundo, plan, EstadoCuidador.EN_CAMINO, EstadoVehiculo.EN_RUTA,
+    )
+
+    def llegar() -> List[Evento]:
+        eventos = []
+        for cuidador_id in plan.cuidadores:
+            eventos.append(ejecutar_transicion(
+                mundo, registro_eventos, "Cuidador", cuidador_id,
+                EstadoCuidador.EJECUTANDO, tiempo, causa,
+                ubicacion=tarea.nodo_destino,
+            ))
+        if plan.vehiculo_id is not None:
+            eventos.append(ejecutar_transicion(
+                mundo, registro_eventos, "Vehiculo", plan.vehiculo_id,
+                EstadoVehiculo.EN_USO, tiempo, causa,
+                ubicacion=tarea.nodo_destino,
+            ))
+        return eventos
+
+    return _ejecutar_con_reversion(
+        mundo, registro_eventos, registro_reservas, llegar,
+    )
+
+
+def _finalizar_ejecucion(
+    mundo: Mundo,
+    registro_eventos: RegistroEventos,
+    registro_reservas: RegistroReservas,
+    tarea_id: str,
+    tiempo: int,
+    causa: str,
+    estado_final: EstadoTarea,
+) -> List[Evento]:
+    tarea, plan = _exigir_tarea_y_plan(
+        mundo, tarea_id, EstadoTarea.EN_CURSO,
+    )
+    _exigir_reloj_monotono(mundo, tiempo)
+    _exigir_estado_recursos(
+        mundo, plan, EstadoCuidador.EJECUTANDO, EstadoVehiculo.EN_USO,
+    )
+
+    def finalizar() -> List[Evento]:
+        eventos = [ejecutar_transicion(
+            mundo, registro_eventos, "Tarea", tarea_id,
+            estado_final, tiempo, causa,
+        )]
+        for cuidador_id in plan.cuidadores:
+            eventos.append(ejecutar_transicion(
+                mundo, registro_eventos, "Cuidador", cuidador_id,
+                EstadoCuidador.DISPONIBLE, tiempo, causa,
+            ))
+        if plan.vehiculo_id is not None:
+            eventos.append(ejecutar_transicion(
+                mundo, registro_eventos, "Vehiculo", plan.vehiculo_id,
+                EstadoVehiculo.DISPONIBLE, tiempo, causa,
+            ))
+        liberar_reservas_tarea(registro_reservas, tarea_id)
+        return eventos
+
+    return _ejecutar_con_reversion(
+        mundo, registro_eventos, registro_reservas, finalizar,
+    )
+
+
+def completar_plan(
+    mundo: Mundo,
+    registro_eventos: RegistroEventos,
+    registro_reservas: RegistroReservas,
+    tarea_id: str,
+    tiempo: int,
+    causa: str,
+) -> List[Evento]:
+    """Completa una tarea llegada a destino y libera sus recursos."""
+    return _finalizar_ejecucion(
+        mundo, registro_eventos, registro_reservas, tarea_id, tiempo, causa,
+        EstadoTarea.COMPLETADA,
+    )
+
+
+def fallar_plan(
+    mundo: Mundo,
+    registro_eventos: RegistroEventos,
+    registro_reservas: RegistroReservas,
+    tarea_id: str,
+    tiempo: int,
+    causa: str,
+) -> List[Evento]:
+    """Marca como fallida una tarea llegada a destino y libera sus recursos."""
+    return _finalizar_ejecucion(
+        mundo, registro_eventos, registro_reservas, tarea_id, tiempo, causa,
+        EstadoTarea.FALLIDA,
+    )

@@ -121,15 +121,16 @@ def validar_ruta_terrestre(
     mundo: Mundo,
     tarea: Tarea,
     plan: PlanEjecucion,
+    verificar_origen: bool = True,
 ) -> List[str]:
-    """Valida la ruta de cualquier vehículo terrestre, excepto helicópteros."""
+    """Valida la ruta terrestre; el origen puede omitirse durante la marcha."""
     errores = []
     vehiculo = mundo.vehiculos.get(plan.vehiculo_id) if plan.vehiculo_id else None
     if vehiculo is None or vehiculo.tipo == TipoVehiculo.HELICOPTERO:
         return errores
     if not plan.ruta:
         return ["La ruta terrestre no puede estar vacía"]
-    if plan.ruta[0] != vehiculo.ubicacion:
+    if verificar_origen and plan.ruta[0] != vehiculo.ubicacion:
         errores.append(
             f"La ruta terrestre debe empezar en {vehiculo.ubicacion}"
         )
