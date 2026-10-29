@@ -200,6 +200,34 @@ def test_estimar_y_construir_plan_con_vehiculo():
     )
 
 
+def test_estimar_plan_usa_tiempos_precalculados_sin_cambiar_el_resultado():
+    mundo = _mundo_base()
+    mundo.cuidadores = {
+        "c1": Cuidador("c1", "Uno", ubicacion=("a",)),
+        "c2": Cuidador("c2", "Dos", ubicacion=("b",)),
+    }
+    mundo.vehiculos = {
+        "v1": Vehiculo(
+            "v1", TipoVehiculo.CAMION_TRASLADO, 5, 4, 2,
+            Certificacion.CAMION_TRASLADO, "b",
+        ),
+    }
+    tarea = Tarea("t1", "traslado", nodo_destino="c", duracion_estimada=20)
+
+    normal = estimar_plan(mundo, tarea, ("c1", "c2"), "v1", 50)
+    precalculado = estimar_plan(
+        mundo,
+        tarea,
+        ("c1", "c2"),
+        "v1",
+        50,
+        tiempos_cuidadores={"c1": 5, "c2": 0},
+        viaje_vehiculo=(("b", "c"), 3),
+    )
+
+    assert normal == precalculado
+
+
 def test_estimar_plan_sin_vehiculo_usa_maximo_de_tiempos_a_pie():
     mundo = _mundo_base()
     mundo.cuidadores = {

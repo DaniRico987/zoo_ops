@@ -139,6 +139,49 @@ def test_sin_vehiculo_requerido_disponible_se_descarta():
     assert any(descartado.motivo == "sin_vehiculo" for descartado in resultado.descartados)
 
 
+def test_ahora_anterior_al_reloj_del_mundo_se_rechaza():
+    mundo = _mundo()
+    mundo.tiempo_actual = 5
+
+    with pytest.raises(ErrorDominio, match="retroceder"):
+        generar_candidatos(mundo, RegistroReservas(), "t1", 4)
+
+
+def test_vehiculo_sin_ruta_se_descarta_una_sola_vez():
+    mundo = _mundo()
+    mundo.aristas.clear()
+
+    resultado = generar_candidatos(mundo, RegistroReservas(), "t1", 0)
+
+    sin_ruta = [
+        descartado for descartado in resultado.descartados
+        if descartado.motivo == "sin_ruta"
+    ]
+    assert not resultado.candidatos
+    assert len(sin_ruta) == 1
+
+
+def test_ruta_del_vehiculo_se_calcula_una_vez_por_opcion(monkeypatch):
+    from zoo_ops.asignacion import candidatos as modulo_candidatos
+
+    llamadas = []
+    calcular_ruta_original = modulo_candidatos.tiempo_vehiculo_a_destino
+
+    def calcular_ruta_contando(mundo, vehiculo, destino):
+        llamadas.append(vehiculo.id)
+        return calcular_ruta_original(mundo, vehiculo, destino)
+
+    monkeypatch.setattr(
+        modulo_candidatos,
+        "tiempo_vehiculo_a_destino",
+        calcular_ruta_contando,
+    )
+
+    generar_candidatos(_mundo(), RegistroReservas(), "t1", 0)
+
+    assert llamadas == ["camion"]
+
+
 def test_sin_suficientes_cuidadores_alcanzables_se_descarta():
     mundo = _mundo()
     mundo.cuidadores.clear()
@@ -190,6 +233,60 @@ def test_reserva_ocupada_descarta_plan():
         descartado.motivo == "reserva_ocupada"
         for descartado in resultado.descartados
     )
+
+
+def test_descartes_de_reserva_se_agrupan_independientemente_de_combinaciones():
+    mundo = _mundo()
+    reservas = RegistroReservas()
+    reservas.agregar_reserva(
+        Reserva(TipoRecurso.VEHICULO, "camion", "otra", 0, 1000),
+    )
+
+    resultado = generar_candidatos(mundo, reservas, "t1", 0)
+
+    descartes = [
+        descartado for descartado in resultado.descartados
+        if descartado.motivo == "reserva_ocupada"
+    ]
+    assert len(descartes) == 1
+    ocurrencias = next(
+        int(detalle.split(": ", 1)[1])
+        for detalle in descartes[0].detalle
+        if detalle.startswith("ocurrencias:")
+    )
+    assert ocurrencias >= 5
+    assert sum(detalle.startswith("ejemplo:") for detalle in descartes[0].detalle) <= 3
+
+
+def test_descartes_de_plan_invalido_se_agrupan_por_vehiculo():
+    mundo = _mundo()
+    mundo.animales["j1"] = Animal(
+        "j1", ESPECIES_CATALOGO["jaguar"], "recinto", "recinto",
+    )
+    mundo.animales["j2"] = Animal(
+        "j2", ESPECIES_CATALOGO["jaguar"], "recinto", "recinto",
+    )
+    mundo.animales["j3"] = Animal(
+        "j3", ESPECIES_CATALOGO["jaguar"], "recinto", "recinto",
+    )
+
+    resultado = generar_candidatos(
+        mundo, RegistroReservas(), "t1", 0,
+        animales_transportados=("j1", "j2", "j3"),
+    )
+
+    descartes = [
+        descartado for descartado in resultado.descartados
+        if descartado.motivo == "plan_invalido"
+    ]
+    assert len(descartes) == 1
+    ocurrencias = next(
+        int(detalle.split(": ", 1)[1])
+        for detalle in descartes[0].detalle
+        if detalle.startswith("ocurrencias:")
+    )
+    assert ocurrencias >= 5
+    assert sum(detalle.startswith("ejemplo:") for detalle in descartes[0].detalle) <= 3
 
 
 def test_cuidadores_con_tarea_activa_no_son_elegibles():

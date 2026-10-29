@@ -9,6 +9,11 @@ from .tiempos import (
 from .candidatos import (
     Candidato, Descartado, ResultadoCandidatos, generar_candidatos,
 )
+from .puntaje import (
+    NIVEL_MAXIMO_HABILIDAD, PERFILES, Componentes, Perfil, Pesos, Puntuado,
+    explicar, perfil_de_tarea, puntuar_candidatos,
+)
+from .propuesta import Propuesta, proponer_planes
 
 __all__ = [
     "ruta_mas_corta",
@@ -24,4 +29,15 @@ __all__ = [
     "Descartado",
     "ResultadoCandidatos",
     "generar_candidatos",
+    "NIVEL_MAXIMO_HABILIDAD",
+    "PERFILES",
+    "Componentes",
+    "Perfil",
+    "Pesos",
+    "Puntuado",
+    "explicar",
+    "perfil_de_tarea",
+    "puntuar_candidatos",
+    "Propuesta",
+    "proponer_planes",
 ]

@@ -12,15 +12,16 @@ from zoo_ops.dominio.enums import (
     Certificacion, EstadoCuidador, EstadoEquipo, EstadoTarea,
     EstadoVehiculo, Habilidad, TipoEquipo,
 )
-from zoo_ops.dominio.errores import ErrorDominio
+from zoo_ops.dominio.errores import ErrorDominio, TiempoRetrocede
 from zoo_ops.dominio.plan import (
     PlanEjecucion, cubre_requisitos_cuidadores, validar_plan,
 )
 from zoo_ops.dominio.reservas import (
-    RegistroReservas, TipoRecurso, paquete_de_reservas,
+    RegistroReservas, paquete_de_reservas,
 )
 from zoo_ops.asignacion.tiempos import (
     Estimacion, construir_plan, estimar_plan, tiempo_llegada_cuidador,
+    tiempo_vehiculo_a_destino,
 )
 
 
@@ -166,32 +167,12 @@ def _seleccionar_equipos(
     return tuple(seleccionados), None
 
 
-def _esta_disponible_sin_mutar(
-    registro_reservas: RegistroReservas,
-    claves_reservadas: set[Tuple[TipoRecurso, str]],
-    recurso_tipo: TipoRecurso,
-    recurso_id: str,
-    desde: int,
-    hasta: int,
-) -> bool:
-    # El registro crea una lista vacía al consultar una clave inexistente.
-    # Esa clave, por definición, no tiene reservas que puedan solaparse.
-    if (recurso_tipo, recurso_id) not in claves_reservadas:
-        return True
-    return registro_reservas.verificar_disponibilidad(
-        recurso_tipo, recurso_id, desde, hasta,
-    )
-
-
 def _reservas_disponibles(
     registro_reservas: RegistroReservas,
     plan: PlanEjecucion,
 ) -> bool:
-    claves_reservadas = set(registro_reservas.reservas_por_recurso())
     return all(
-        _esta_disponible_sin_mutar(
-            registro_reservas,
-            claves_reservadas,
+        registro_reservas.verificar_disponibilidad(
             reserva.recurso_tipo,
             reserva.recurso_id,
             reserva.desde,
@@ -199,6 +180,44 @@ def _reservas_disponibles(
         )
         for reserva in paquete_de_reservas(plan)
     )
+
+
+def _acumular_descartado(
+    acumulados: dict[
+        Tuple[str, Optional[str]],
+        Tuple[int, list[str]],
+    ],
+    motivo: str,
+    vehiculo_id: Optional[str],
+    detalle: str,
+    ocurrencias: int = 1,
+) -> None:
+    clave = (motivo, vehiculo_id)
+    cantidad, ejemplos = acumulados.get(clave, (0, []))
+    acumulados[clave] = (
+        cantidad + ocurrencias,
+        (ejemplos + [detalle])[:3],
+    )
+
+
+def _materializar_descartados(
+    acumulados: dict[
+        Tuple[str, Optional[str]],
+        Tuple[int, list[str]],
+    ],
+) -> Tuple[Descartado, ...]:
+    descartados = []
+    for (motivo, vehiculo_id), (cantidad, ejemplos) in sorted(
+        acumulados.items(),
+        key=lambda item: (item[0][0], item[0][1] or ""),
+    ):
+        detalle = []
+        if vehiculo_id is not None:
+            detalle.append(f"vehículo: {vehiculo_id}")
+        detalle.append(f"ocurrencias: {cantidad}")
+        detalle.extend(f"ejemplo: {ejemplo}" for ejemplo in ejemplos)
+        descartados.append(Descartado(motivo, tuple(detalle)))
+    return tuple(descartados)
 
 
 def generar_candidatos(
@@ -211,6 +230,9 @@ def generar_candidatos(
     max_combinaciones: int = 2000,
 ) -> ResultadoCandidatos:
     """Genera planes candidatos sin modificar el mundo ni el registro."""
+    if ahora < mundo.tiempo_actual:
+        raise TiempoRetrocede(mundo.tiempo_actual, ahora)
+
     tarea = mundo.tareas.get(tarea_id)
     if tarea is None:
         raise ErrorDominio(f"La tarea {tarea_id} no existe en el mundo")
@@ -233,7 +255,7 @@ def generar_candidatos(
         )
     )
     cantidad = max(1, tarea.personas_minimas)
-    descartados = []
+    descartes_acumulados = {}
     candidatos = []
 
     if tarea.vehiculo_requerido is not None:
@@ -249,15 +271,15 @@ def generar_candidatos(
             )
         )
         if not vehiculos:
+            _acumular_descartado(
+                descartes_acumulados,
+                "sin_vehiculo",
+                None,
+                f"No hay vehículos DISPONIBLES de tipo {tarea.vehiculo_requerido.name}",
+            )
             return ResultadoCandidatos(
                 (),
-                (Descartado(
-                    "sin_vehiculo",
-                    (
-                        f"No hay vehículos DISPONIBLES de tipo "
-                        f"{tarea.vehiculo_requerido.name}",
-                    ),
-                ),),
+                _materializar_descartados(descartes_acumulados),
             )
         opciones_vehiculo = vehiculos
     else:
@@ -278,23 +300,41 @@ def generar_candidatos(
             else (None,) + vehiculos_disponibles
         )
         if not opciones_vehiculo:
-            descartados.append(Descartado(
+            _acumular_descartado(
+                descartes_acumulados,
                 "sin_vehiculo",
-                ("Los animales transportados requieren un vehículo disponible",),
-            ))
-            return ResultadoCandidatos((), tuple(descartados))
+                None,
+                "Los animales transportados requieren un vehículo disponible",
+            )
+            return ResultadoCandidatos(
+                (),
+                _materializar_descartados(descartes_acumulados),
+            )
 
     for vehiculo in opciones_vehiculo:
         vehiculo_id = vehiculo.id if vehiculo is not None else None
+        viaje_vehiculo = (
+            tiempo_vehiculo_a_destino(
+                mundo, vehiculo, tarea.nodo_destino,
+            )
+            if vehiculo is not None
+            else None
+        )
+        if vehiculo is not None and viaje_vehiculo is None:
+            _acumular_descartado(
+                descartes_acumulados,
+                "sin_ruta",
+                vehiculo_id,
+                "No existe una ruta del vehículo hasta el destino",
+            )
+            continue
         if vehiculo is not None and cantidad > vehiculo.capacidad_personas:
-            descartados.append(Descartado(
+            _acumular_descartado(
+                descartes_acumulados,
                 "capacidad",
-                (
-                    f"El vehículo {vehiculo.id} admite "
-                    f"{vehiculo.capacidad_personas} personas; se requieren "
-                    f"{cantidad}",
-                ),
-            ))
+                vehiculo_id,
+                f"Admite {vehiculo.capacidad_personas} personas; se requieren {cantidad}",
+            )
             continue
 
         tiempos = {}
@@ -318,19 +358,22 @@ def generar_candidatos(
             )
         )
         if len(elegibles) < cantidad:
-            descartados.append(Descartado(
+            _acumular_descartado(
+                descartes_acumulados,
                 "pocos_cuidadores",
-                (
-                    f"Solo {len(elegibles)} cuidadores pueden llegar; "
-                    f"se requieren {cantidad}",
-                    *( (f"vehículo: {vehiculo_id}",) if vehiculo_id else () ),
-                ),
-            ))
+                vehiculo_id,
+                f"Solo {len(elegibles)} cuidadores pueden llegar; se requieren {cantidad}",
+            )
             continue
 
         equipos, descarte_equipo = _seleccionar_equipos(mundo, tarea)
         if descarte_equipo is not None:
-            descartados.append(descarte_equipo)
+            _acumular_descartado(
+                descartes_acumulados,
+                descarte_equipo.motivo,
+                vehiculo_id,
+                "; ".join(descarte_equipo.detalle),
+            )
             continue
 
         fallo_cobertura_voraz = False
@@ -370,13 +413,21 @@ def generar_candidatos(
                 continue
 
             estimacion = estimar_plan(
-                mundo, tarea, ids_cuidadores, vehiculo_id, ahora,
+                mundo,
+                tarea,
+                ids_cuidadores,
+                vehiculo_id,
+                ahora,
+                tiempos_cuidadores=tiempos,
+                viaje_vehiculo=viaje_vehiculo,
             )
             if estimacion is None:
-                descartados.append(Descartado(
+                _acumular_descartado(
+                    descartes_acumulados,
                     "plan_invalido",
-                    ("No se pudo estimar una ruta para el equipo seleccionado",),
-                ))
+                    vehiculo_id,
+                    "No se pudo estimar una ruta para el equipo seleccionado",
+                )
                 continue
             plan = construir_plan(
                 estimacion,
@@ -388,27 +439,31 @@ def generar_candidatos(
             )
             errores_plan = validar_plan(mundo, plan)
             if errores_plan:
-                descartados.append(
-                    Descartado("plan_invalido", tuple(sorted(errores_plan)))
+                _acumular_descartado(
+                    descartes_acumulados,
+                    "plan_invalido",
+                    vehiculo_id,
+                    "; ".join(sorted(errores_plan)),
                 )
                 continue
             if not _reservas_disponibles(registro_reservas, plan):
-                descartados.append(Descartado(
+                _acumular_descartado(
+                    descartes_acumulados,
                     "reserva_ocupada",
-                    (f"Hay reservas solapadas para el equipo {ids_cuidadores}",),
-                ))
+                    vehiculo_id,
+                    f"Hay reservas solapadas para el equipo {ids_cuidadores}",
+                )
                 continue
             candidatos.append(Candidato(plan, estimacion))
 
         if hubo_sin_cobertura:
-            descartados.append(Descartado(
+            _acumular_descartado(
+                descartes_acumulados,
                 "sin_cobertura",
-                (
-                    f"{cantidad_sin_cobertura} combinaciones no cubren los "
-                    "requisitos de habilidades o certificaciones",
-                    *( (f"vehículo: {vehiculo_id}",) if vehiculo_id else () ),
-                ),
-            ))
+                vehiculo_id,
+                f"{cantidad_sin_cobertura} combinaciones no cubren los requisitos de habilidades o certificaciones",
+                cantidad_sin_cobertura,
+            )
 
     candidatos.sort(
         key=lambda candidato: (
@@ -419,5 +474,5 @@ def generar_candidatos(
     )
     return ResultadoCandidatos(
         tuple(candidatos),
-        tuple(descartados),
+        _materializar_descartados(descartes_acumulados),
     )

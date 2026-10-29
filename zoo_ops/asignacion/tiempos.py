@@ -2,7 +2,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Mapping, Optional, Tuple
 
 from zoo_ops.dominio.entidades import Cuidador, Mundo, Tarea, Vehiculo, nodo_de_ubicacion
 from zoo_ops.dominio.enums import MedioPermitido, TipoVehiculo
@@ -109,6 +109,8 @@ def estimar_plan(
     vehiculo_id: Optional[str],
     ahora: int,
     preparacion: int = TIEMPO_PREPARACION_HELICOPTERO,
+    tiempos_cuidadores: Optional[Mapping[str, int]] = None,
+    viaje_vehiculo: Optional[Tuple[Tuple[str, ...], int]] = None,
 ) -> Optional[Estimacion]:
     """Estima espera y viaje sin modificar el mundo ni las entidades."""
     cuidadores = []
@@ -121,10 +123,19 @@ def estimar_plan(
         return None
 
     if vehiculo_id is None:
-        tiempos = [
-            tiempo_llegada_cuidador(mundo, cuidador, tarea.nodo_destino)
-            for cuidador in cuidadores
-        ]
+        tiempos = (
+            [
+                tiempos_cuidadores.get(cuidador.id)
+                for cuidador in cuidadores
+            ]
+            if tiempos_cuidadores is not None
+            else [
+                tiempo_llegada_cuidador(
+                    mundo, cuidador, tarea.nodo_destino,
+                )
+                for cuidador in cuidadores
+            ]
+        )
         if any(tiempo is None for tiempo in tiempos):
             return None
         espera_recogida = 0
@@ -134,14 +145,23 @@ def estimar_plan(
         vehiculo = mundo.vehiculos.get(vehiculo_id)
         if vehiculo is None:
             return None
-        tiempos_recogida = [
-            tiempo_llegada_cuidador(mundo, cuidador, vehiculo.ubicacion)
-            for cuidador in cuidadores
-        ]
+        tiempos_recogida = (
+            [
+                tiempos_cuidadores.get(cuidador.id)
+                for cuidador in cuidadores
+            ]
+            if tiempos_cuidadores is not None
+            else [
+                tiempo_llegada_cuidador(
+                    mundo, cuidador, vehiculo.ubicacion,
+                )
+                for cuidador in cuidadores
+            ]
+        )
         if any(tiempo is None for tiempo in tiempos_recogida):
             return None
         espera_recogida = max(tiempos_recogida)
-        resultado_viaje = tiempo_vehiculo_a_destino(
+        resultado_viaje = viaje_vehiculo or tiempo_vehiculo_a_destino(
             mundo, vehiculo, tarea.nodo_destino, preparacion,
         )
         if resultado_viaje is None:

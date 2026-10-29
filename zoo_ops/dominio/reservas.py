@@ -97,6 +97,17 @@ class RegistroReservas:
     def _clave(self, recurso_tipo: TipoRecurso, recurso_id: str) -> Tuple[TipoRecurso, str]:
         return (recurso_tipo, recurso_id)
     
+    def _consultar_lista(
+        self,
+        recurso_tipo: TipoRecurso,
+        recurso_id: str,
+    ) -> List[Reserva]:
+        """Consulta reservas sin crear una entrada para recursos desconocidos."""
+        return self._reservas_por_recurso.get(
+            self._clave(recurso_tipo, recurso_id),
+            [],
+        )
+
     def _obtener_lista(self, recurso_tipo: TipoRecurso, recurso_id: str) -> List[Reserva]:
         clave = self._clave(recurso_tipo, recurso_id)
         if clave not in self._reservas_por_recurso:
@@ -115,7 +126,7 @@ class RegistroReservas:
         Verifica si un recurso está disponible en el intervalo [desde, hasta).
         Opcionalmente excluye reservas de una tarea específica (para reprogramación).
         """
-        reservas = self._obtener_lista(recurso_tipo, recurso_id)
+        reservas = self._consultar_lista(recurso_tipo, recurso_id)
         nueva = Reserva(recurso_tipo, recurso_id, "_temp_", desde, hasta)
         
         for reserva in reservas:
@@ -162,7 +173,7 @@ class RegistroReservas:
     
     def obtener_reservas_recurso(self, recurso_tipo: TipoRecurso, recurso_id: str) -> List[Reserva]:
         """Obtiene todas las reservas de un recurso."""
-        return list(self._obtener_lista(recurso_tipo, recurso_id))
+        return list(self._consultar_lista(recurso_tipo, recurso_id))
     
     def limpiar(self) -> None:
         """Limpia todas las reservas (para tests)."""

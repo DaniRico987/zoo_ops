@@ -72,6 +72,15 @@ class TestRegistroReservas:
     
     def test_verificar_disponibilidad_vacio(self):
         assert self.registro.verificar_disponibilidad(TipoRecurso.CUIDADOR, "c1", 100, 200) is True
+
+    def test_verificar_disponibilidad_sin_reservas_no_muta_el_registro(self):
+        antes = self.registro.reservas_por_recurso()
+
+        assert self.registro.verificar_disponibilidad(
+            TipoRecurso.CUIDADOR, "c1", 100, 200,
+        ) is True
+
+        assert self.registro.reservas_por_recurso() == antes
     
     def test_agregar_y_verificar(self):
         r = Reserva(TipoRecurso.CUIDADOR, "c1", "t1", 100, 200)
