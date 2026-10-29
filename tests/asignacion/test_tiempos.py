@@ -49,6 +49,7 @@ def _mundo_base():
 def test_segundos_de_viaje_redondea_hacia_arriba():
     assert segundos_de_viaje(10, 3) == 4
     assert segundos_de_viaje(10, 2) == 5
+    assert segundos_de_viaje(0.1 + 0.2, 0.1) == 3
 
 
 @pytest.mark.parametrize("velocidad", [0, -1])
@@ -89,6 +90,13 @@ def test_tiempo_llegada_cuidador_devuelve_none_si_no_hay_ruta():
     assert tiempo_llegada_cuidador(mundo, cuidador, "a") is None
 
 
+def test_tiempo_llegada_cuidador_devuelve_none_con_velocidad_no_positiva():
+    mundo = _mundo_base()
+    cuidador = Cuidador("c1", "Cuidador", velocidad_base=0, ubicacion=("a",))
+
+    assert tiempo_llegada_cuidador(mundo, cuidador, "b") is None
+
+
 @pytest.mark.parametrize(
     ("tipo", "certificacion"),
     [
@@ -127,6 +135,17 @@ def test_tiempo_vehiculo_devuelve_none_si_no_hay_camino():
     mundo.aristas.clear()
     vehiculo = Vehiculo(
         "v1", TipoVehiculo.JEEP, 5, 4, 2,
+        Certificacion.JEEP, "a", EstadoVehiculo.DISPONIBLE,
+    )
+
+    assert tiempo_vehiculo_a_destino(mundo, vehiculo, "b") is None
+
+
+@pytest.mark.parametrize("velocidad", [0, -1])
+def test_tiempo_vehiculo_devuelve_none_con_velocidad_no_positiva(velocidad):
+    mundo = _mundo_base()
+    vehiculo = Vehiculo(
+        "v1", TipoVehiculo.JEEP, velocidad, 4, 2,
         Certificacion.JEEP, "a", EstadoVehiculo.DISPONIBLE,
     )
 
@@ -196,6 +215,9 @@ def test_estimar_plan_sin_vehiculo_usa_maximo_de_tiempos_a_pie():
     assert estimacion.espera_recogida == 0
     assert estimacion.viaje == 17
     assert (estimacion.desde, estimacion.hasta) == (100, 123)
+    assert estimacion.salida == 100
+    assert estimacion.llegada == 117
+    assert estimacion.fin == 123
 
 
 def test_estimar_plan_devuelve_none_si_un_cuidador_no_puede_llegar():

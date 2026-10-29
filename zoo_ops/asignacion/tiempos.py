@@ -24,12 +24,27 @@ class Estimacion:
     desde: int
     hasta: int
 
+    @property
+    def salida(self) -> int:
+        """Instante de salida tras esperar a la recogida."""
+        return self.desde + self.espera_recogida
+
+    @property
+    def llegada(self) -> int:
+        """Instante de llegada después del viaje."""
+        return self.salida + self.viaje
+
+    @property
+    def fin(self) -> int:
+        """Instante de finalización de la tarea."""
+        return self.hasta
+
 
 def segundos_de_viaje(distancia: float, velocidad: float) -> int:
     """Redondea hacia arriba el viaje; distancia y velocidad usan unidades de arista, por segundo."""
     if velocidad <= 0:
         raise ErrorDominio("La velocidad debe ser mayor que cero")
-    return math.ceil(distancia / velocidad)
+    return math.ceil(round(distancia / velocidad, 9))
 
 
 def distancia_recta(mundo: Mundo, a: str, b: str) -> float:
@@ -54,7 +69,7 @@ def tiempo_llegada_cuidador(
 ) -> Optional[int]:
     """Devuelve duración a pie en segundos; no estima ubicaciones sobre aristas."""
     origen = nodo_de_ubicacion(cuidador.ubicacion)
-    if origen is None:
+    if origen is None or cuidador.velocidad_base <= 0:
         return None
     resultado = ruta_mas_corta(mundo, origen, destino, MedioPermitido.PIE)
     if resultado is None:
@@ -70,6 +85,8 @@ def tiempo_vehiculo_a_destino(
     preparacion: int = TIEMPO_PREPARACION_HELICOPTERO,
 ) -> Optional[Tuple[Tuple[str, ...], int]]:
     """Estima la ruta y duración del vehículo, incluida la preparación del helicóptero."""
+    if vehiculo.velocidad <= 0:
+        return None
     if vehiculo.tipo == TipoVehiculo.HELICOPTERO:
         distancia = distancia_recta(mundo, vehiculo.ubicacion, destino)
         return (), preparacion + segundos_de_viaje(
