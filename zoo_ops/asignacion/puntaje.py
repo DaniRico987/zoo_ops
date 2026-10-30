@@ -13,6 +13,7 @@ from zoo_ops.asignacion.candidatos import Candidato
 
 
 NIVEL_MAXIMO_HABILIDAD = 5
+ESCALA_TIEMPO_SEGUNDOS = 60
 
 
 class Perfil(Enum):
@@ -150,20 +151,8 @@ def _componente_habilidad(
 def _componente_carga(
     mundo: Mundo,
     candidato: Candidato,
+    cargas: Mapping[str, int],
 ) -> float:
-    terminales = {
-        EstadoTarea.COMPLETADA,
-        EstadoTarea.FALLIDA,
-    }
-    cargas = {
-        cuidador_id: sum(
-            1
-            for tarea in mundo.tareas.values()
-            if tarea.estado in terminales
-            and cuidador_id in tarea.cuidadores_asignados
-        )
-        for cuidador_id in mundo.cuidadores
-    }
     if not candidato.plan.cuidadores:
         raise ErrorDominio("El candidato debe incluir al menos un cuidador")
     carga_equipo = sum(
@@ -193,6 +182,7 @@ def _componente_continuidad(
     mundo: Mundo,
     tarea: Tarea,
     candidato: Candidato,
+    indice_continuidad: Mapping[str, Mapping[str, frozenset[str]]],
 ) -> float:
     continuos = 0
     for cuidador_id in candidato.plan.cuidadores:
@@ -204,15 +194,48 @@ def _componente_continuidad(
         esta_en_destino = (
             nodo_de_ubicacion(cuidador.ubicacion) == tarea.nodo_destino
         )
-        continua_incidente = tarea.incidente_origen is not None and any(
-            otra_tarea.id != tarea.id
-            and otra_tarea.incidente_origen == tarea.incidente_origen
-            and cuidador_id in otra_tarea.cuidadores_asignados
-            for otra_tarea in mundo.tareas.values()
+        tareas_del_incidente = (
+            indice_continuidad.get(tarea.incidente_origen, {})
+            .get(cuidador_id, frozenset())
+            if tarea.incidente_origen is not None
+            else frozenset()
+        )
+        continua_incidente = any(
+            tarea_id != tarea.id for tarea_id in tareas_del_incidente
         )
         if esta_en_destino or continua_incidente:
             continuos += 1
     return continuos / len(candidato.plan.cuidadores)
+
+
+def _cargas_cuidadores(mundo: Mundo) -> dict[str, int]:
+    terminales = {EstadoTarea.COMPLETADA, EstadoTarea.FALLIDA}
+    cargas = {cuidador_id: 0 for cuidador_id in mundo.cuidadores}
+    for tarea in mundo.tareas.values():
+        if tarea.estado in terminales:
+            for cuidador_id in set(tarea.cuidadores_asignados):
+                if cuidador_id in cargas:
+                    cargas[cuidador_id] += 1
+    return cargas
+
+
+def _indice_continuidad(
+    mundo: Mundo,
+) -> dict[str, dict[str, frozenset[str]]]:
+    acumulado: dict[str, dict[str, set[str]]] = {}
+    for tarea in mundo.tareas.values():
+        if tarea.incidente_origen is None:
+            continue
+        por_cuidador = acumulado.setdefault(tarea.incidente_origen, {})
+        for cuidador_id in set(tarea.cuidadores_asignados):
+            por_cuidador.setdefault(cuidador_id, set()).add(tarea.id)
+    return {
+        incidente_id: {
+            cuidador_id: frozenset(tarea_ids)
+            for cuidador_id, tarea_ids in por_cuidador.items()
+        }
+        for incidente_id, por_cuidador in acumulado.items()
+    }
 
 
 def puntuar_candidatos(
@@ -221,8 +244,16 @@ def puntuar_candidatos(
     candidatos: Tuple[Candidato, ...],
     perfil: Optional[Perfil] = None,
     pesos: Optional[Pesos] = None,
+    escala_tiempo_segundos: float = ESCALA_TIEMPO_SEGUNDOS,
 ) -> Tuple[Puntuado, ...]:
     """Puntúa y ordena candidatos, sin cambiar el mundo."""
+    if (
+        not isinstance(escala_tiempo_segundos, (int, float))
+        or isinstance(escala_tiempo_segundos, bool)
+        or not isfinite(escala_tiempo_segundos)
+        or escala_tiempo_segundos <= 0
+    ):
+        raise ErrorDominio("La escala de tiempo debe ser finita y mayor que cero")
     tarea = mundo.tareas.get(tarea_id)
     if tarea is None:
         raise ErrorDominio(f"La tarea {tarea_id} no existe en el mundo")
@@ -230,6 +261,10 @@ def puntuar_candidatos(
         raise ErrorDominio(
             f"La tarea {tarea_id} debe estar PENDIENTE; "
             f"está {tarea.estado.name}"
+        )
+    if any(candidato.plan.tarea_id != tarea_id for candidato in candidatos):
+        raise ErrorDominio(
+            f"Cada candidato debe pertenecer a la tarea {tarea_id}"
         )
     if not candidatos:
         return ()
@@ -240,23 +275,26 @@ def puntuar_candidatos(
         candidato.estimacion.llegada - candidato.estimacion.desde
         for candidato in candidatos
     )
-    minimo, maximo = min(tiempos), max(tiempos)
+    tiempo_minimo = min(tiempos)
+    cargas = _cargas_cuidadores(mundo)
+    indice_continuidad = _indice_continuidad(mundo)
 
     puntuados = []
     for candidato, tiempo in zip(candidatos, tiempos):
-        componente_tiempo = (
+        componente_tiempo = 1.0 / (
             1.0
-            if maximo == minimo
-            else (maximo - tiempo) / (maximo - minimo)
+            + max(0, tiempo - tiempo_minimo) / escala_tiempo_segundos
         )
         componentes = Componentes(
             tiempo=componente_tiempo,
             habilidad=_componente_habilidad(
                 mundo, tarea, candidato, perfil_elegido,
             ),
-            carga=_componente_carga(mundo, candidato),
+            carga=_componente_carga(mundo, candidato, cargas),
             fatiga=_componente_fatiga(mundo, candidato),
-            continuidad=_componente_continuidad(mundo, tarea, candidato),
+            continuidad=_componente_continuidad(
+                mundo, tarea, candidato, indice_continuidad,
+            ),
         )
         puntaje = round(
             pesos_elegidos.tiempo * componentes.tiempo

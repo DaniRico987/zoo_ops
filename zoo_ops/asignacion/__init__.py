@@ -10,8 +10,8 @@ from .candidatos import (
     Candidato, Descartado, ResultadoCandidatos, generar_candidatos,
 )
 from .puntaje import (
-    NIVEL_MAXIMO_HABILIDAD, PERFILES, Componentes, Perfil, Pesos, Puntuado,
-    explicar, perfil_de_tarea, puntuar_candidatos,
+    ESCALA_TIEMPO_SEGUNDOS, NIVEL_MAXIMO_HABILIDAD, PERFILES, Componentes,
+    Perfil, Pesos, Puntuado, explicar, perfil_de_tarea, puntuar_candidatos,
 )
 from .propuesta import Propuesta, proponer_planes
 
@@ -30,6 +30,7 @@ __all__ = [
     "ResultadoCandidatos",
     "generar_candidatos",
     "NIVEL_MAXIMO_HABILIDAD",
+    "ESCALA_TIEMPO_SEGUNDOS",
     "PERFILES",
     "Componentes",
     "Perfil",

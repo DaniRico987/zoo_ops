@@ -6,7 +6,8 @@ import pytest
 
 from zoo_ops.asignacion.candidatos import Candidato
 from zoo_ops.asignacion.puntaje import (
-    NIVEL_MAXIMO_HABILIDAD, PERFILES, Componentes, Perfil, Pesos, explicar,
+    ESCALA_TIEMPO_SEGUNDOS, NIVEL_MAXIMO_HABILIDAD, PERFILES, Componentes,
+    Perfil, Pesos, explicar,
     perfil_de_tarea, puntuar_candidatos,
 )
 from zoo_ops.asignacion.tiempos import Estimacion
@@ -128,19 +129,61 @@ def test_perfil_de_tarea_usa_mapa_y_deducciones(tarea, perfiles_por_tipo, espera
     assert perfil_de_tarea(tarea, perfiles_por_tipo) == esperado
 
 
-def test_tiempo_es_uno_para_candidato_unico_y_normaliza_dos_candidatos():
+def test_tiempo_usa_escala_fija_y_es_uno_para_candidato_unico():
     mundo = _mundo_puntaje()
     tarea = mundo.tareas["t1"]
     unico = puntuar_candidatos(
         mundo, "t1", (_candidato(("c1",), llegada=10),), perfil=Perfil.RUTINA,
     )
-    dos = puntuar_candidatos(
-        mundo, "t1", _candidatos_para_tiempo(), perfil=Perfil.RUTINA,
+    diferencia_un_segundo = puntuar_candidatos(
+        mundo,
+        "t1",
+        (
+            _candidato(("c1",), llegada=10),
+            _candidato(("c2",), llegada=11),
+        ),
+        perfil=Perfil.RUTINA,
+    )
+    diferencia_trescientos_segundos = puntuar_candidatos(
+        mundo,
+        "t1",
+        (
+            _candidato(("c1",), llegada=10),
+            _candidato(("c2",), llegada=310),
+        ),
+        perfil=Perfil.RUTINA,
     )
 
+    assert ESCALA_TIEMPO_SEGUNDOS == 60
     assert unico[0].componentes.tiempo == 1.0
-    assert [item.componentes.tiempo for item in dos] == [1.0, 0.0]
+    assert diferencia_un_segundo[0].componentes.tiempo == 1.0
+    assert diferencia_un_segundo[1].componentes.tiempo == 1 / (1 + 1 / 60)
+    assert diferencia_trescientos_segundos[1].componentes.tiempo == 1 / 6
     assert tarea.estado == EstadoTarea.PENDIENTE
+
+
+def test_tiempo_rechaza_escala_no_positiva():
+    mundo = _mundo_puntaje()
+
+    with pytest.raises(ErrorDominio, match="escala"):
+        puntuar_candidatos(
+            mundo, "t1", (), escala_tiempo_segundos=0,
+        )
+
+
+def test_tiempo_igual_para_todos_los_candidatos_es_uno():
+    mundo = _mundo_puntaje()
+
+    puntuados = puntuar_candidatos(
+        mundo,
+        "t1",
+        (
+            _candidato(("c1",), llegada=10),
+            _candidato(("c2",), llegada=10),
+        ),
+    )
+
+    assert all(item.componentes.tiempo == 1.0 for item in puntuados)
 
 
 def test_componentes_habilidad_carga_fatiga_y_continuidad_calculados_a_mano():
@@ -214,6 +257,80 @@ def test_emergencia_prefiere_equipo_rapido_aunque_tenga_mas_fatiga():
 
     assert ranking[0].candidato == candidatos[0]
     assert ranking[0].componentes.fatiga == 0
+
+
+def test_emergencia_no_sacrifica_habilidad_clara_por_un_segundo():
+    tarea = _tarea(
+        habilidades=(HabilidadRequerida(Habilidad.MANEJO_FELINOS, 1),),
+    )
+    mundo = _mundo_puntaje(tarea)
+    mundo.cuidadores["c1"] = Cuidador(
+        "c1", "Experto", habilidades={Habilidad.MANEJO_FELINOS: 5},
+    )
+    mundo.cuidadores["c2"] = Cuidador(
+        "c2", "Principiante", habilidades={Habilidad.MANEJO_FELINOS: 1},
+    )
+    candidatos = (
+        _candidato(("c2",), llegada=10),
+        _candidato(("c1",), llegada=11),
+    )
+
+    ranking = puntuar_candidatos(
+        mundo, "t1", candidatos, perfil=Perfil.EMERGENCIA,
+    )
+
+    assert ranking[0].candidato == candidatos[1]
+
+
+def test_componentes_precalculados_equivalen_al_calculo_anterior():
+    tarea = _tarea(incidente_origen="inc1")
+    mundo = _mundo_puntaje(tarea)
+    mundo.tareas["historial1"] = Tarea(
+        "historial1", "otra", estado=EstadoTarea.COMPLETADA,
+        incidente_origen="inc1", cuidadores_asignados=("c2",),
+    )
+    mundo.tareas["historial2"] = Tarea(
+        "historial2", "otra", estado=EstadoTarea.FALLIDA,
+        incidente_origen="inc1", cuidadores_asignados=("c2", "c3"),
+    )
+    candidatos = (
+        _candidato(("c1", "c2"), llegada=10),
+        _candidato(("c2", "c3"), llegada=12),
+    )
+
+    puntuados = puntuar_candidatos(mundo, "t1", candidatos)
+    terminales = {EstadoTarea.COMPLETADA, EstadoTarea.FALLIDA}
+    cargas = {
+        cuidador_id: sum(
+            1
+            for tarea_en_mundo in mundo.tareas.values()
+            if tarea_en_mundo.estado in terminales
+            and cuidador_id in tarea_en_mundo.cuidadores_asignados
+        )
+        for cuidador_id in mundo.cuidadores
+    }
+    carga_maxima = max(cargas.values(), default=0)
+
+    for puntuado in puntuados:
+        cuidadores = puntuado.candidato.plan.cuidadores
+        carga_equipo = sum(cargas[cuidador_id] for cuidador_id in cuidadores) / len(cuidadores)
+        carga_anterior = 1 - carga_equipo / max(1, carga_maxima)
+        continuos = 0
+        for cuidador_id in cuidadores:
+            cuidador = mundo.cuidadores[cuidador_id]
+            esta_en_destino = cuidador.ubicacion == ("destino",)
+            continua_incidente = any(
+                tarea_en_mundo.id != tarea.id
+                and tarea_en_mundo.incidente_origen == tarea.incidente_origen
+                and cuidador_id in tarea_en_mundo.cuidadores_asignados
+                for tarea_en_mundo in mundo.tareas.values()
+            )
+            if esta_en_destino or continua_incidente:
+                continuos += 1
+        continuidad_anterior = continuos / len(cuidadores)
+
+        assert puntuado.componentes.carga == carga_anterior
+        assert puntuado.componentes.continuidad == continuidad_anterior
 
 
 def test_rutina_prefiere_equipo_menos_cargado_y_descansado_aunque_tarde():
@@ -308,3 +425,16 @@ def test_componentes_sin_habilidades_requeridas_valen_uno():
     )[0]
 
     assert puntuado.componentes.habilidad == 1.0
+
+
+def test_puntuar_rechaza_candidatos_de_otra_tarea():
+    mundo = _mundo_puntaje()
+    candidato = _candidato(("c1",), llegada=5)
+    plan_ajeno = PlanEjecucion(
+        tarea_id="otra", cuidadores=candidato.plan.cuidadores,
+        desde=candidato.plan.desde, hasta=candidato.plan.hasta,
+    )
+    candidato_ajeno = Candidato(plan_ajeno, candidato.estimacion)
+
+    with pytest.raises(ErrorDominio, match="pertenecer a la tarea"):
+        puntuar_candidatos(mundo, "t1", (candidato_ajeno,))

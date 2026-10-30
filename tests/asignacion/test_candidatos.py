@@ -1,6 +1,7 @@
 """Pruebas de generación pura y determinista de candidatos."""
 
 import copy
+from dataclasses import replace
 
 import pytest
 
@@ -159,6 +160,46 @@ def test_vehiculo_sin_ruta_se_descarta_una_sola_vez():
     ]
     assert not resultado.candidatos
     assert len(sin_ruta) == 1
+
+
+def test_exclusion_de_vehiculo_solo_aplica_si_la_tarea_no_exige_tipo():
+    mundo = _mundo(vehiculo_requerido=None)
+    mundo.tareas["t1"] = replace(
+        mundo.tareas["t1"],
+        certificaciones_requeridas=frozenset(),
+        equipos_requeridos=(),
+    )
+
+    filtrado = generar_candidatos(
+        mundo,
+        RegistroReservas(),
+        "t1",
+        0,
+        tipos_vehiculo_excluidos=(TipoVehiculo.HELICOPTERO,),
+    )
+    mundo.tareas["t1"] = replace(
+        mundo.tareas["t1"],
+        vehiculo_requerido=TipoVehiculo.HELICOPTERO,
+    )
+    requerido = generar_candidatos(
+        mundo,
+        RegistroReservas(),
+        "t1",
+        0,
+        tipos_vehiculo_excluidos=(TipoVehiculo.HELICOPTERO,),
+    )
+
+    assert all(
+        mundo.vehiculos[candidato.plan.vehiculo_id].tipo
+        != TipoVehiculo.HELICOPTERO
+        for candidato in filtrado.candidatos
+        if candidato.plan.vehiculo_id is not None
+    )
+    assert requerido.candidatos
+    assert all(
+        candidato.plan.vehiculo_id == "helicoptero"
+        for candidato in requerido.candidatos
+    )
 
 
 def test_ruta_del_vehiculo_se_calcula_una_vez_por_opcion(monkeypatch):

@@ -33,10 +33,17 @@ ejemplos para evitar que la salida crezca con cada combinación.
 ## Puntaje y propuestas
 
 Los pesos de `EMERGENCIA`, `RUTINA` y `MANTENIMIENTO` son valores iniciales de
-diseño y deben afinarse con el simulador. El componente de tiempo es relativo
-al conjunto de candidatos evaluado: si cambia ese conjunto, pueden cambiar
-los componentes y el ranking. La carga cuenta solo tareas `COMPLETADA` o
-`FALLIDA` que siguen en `mundo.tareas`.
+diseño y deben afinarse con el simulador. El componente de tiempo se calcula
+como `1 / (1 + max(0, t - t_min) / ESCALA_TIEMPO_SEGUNDOS)`, donde `t` es
+`llegada - desde`, `t_min` el menor tiempo del conjunto evaluado y la escala
+predeterminada es 60 segundos. Al cambiar los candidatos evaluados puede
+cambiar `t_min` y, por tanto, el puntaje de tiempo. La carga cuenta solo tareas
+`COMPLETADA` o `FALLIDA` que siguen en `mundo.tareas`.
+
+Las propuestas excluyen helicópteros por defecto para perfiles distintos de
+`EMERGENCIA`; el perfil de emergencia los permite. Esta política puede
+sobrescribirse explícitamente. Un helicóptero exigido por el tipo de tarea se
+mantiene como opción independientemente del perfil.
 
 | Perfil | Tiempo | Habilidad | Carga | Fatiga | Continuidad |
 |--------|-------:|----------:|------:|-------:|------------:|

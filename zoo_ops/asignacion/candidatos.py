@@ -10,7 +10,7 @@ from zoo_ops.dominio.entidades import (
 )
 from zoo_ops.dominio.enums import (
     Certificacion, EstadoCuidador, EstadoEquipo, EstadoTarea,
-    EstadoVehiculo, Habilidad, TipoEquipo,
+    EstadoVehiculo, Habilidad, TipoEquipo, TipoVehiculo,
 )
 from zoo_ops.dominio.errores import ErrorDominio, TiempoRetrocede
 from zoo_ops.dominio.plan import (
@@ -228,6 +228,7 @@ def generar_candidatos(
     animales_transportados: Tuple[str, ...] = (),
     permitir_vehiculos: bool = True,
     max_combinaciones: int = 2000,
+    tipos_vehiculo_excluidos: Tuple[TipoVehiculo, ...] = (),
 ) -> ResultadoCandidatos:
     """Genera planes candidatos sin modificar el mundo ni el registro."""
     if ahora < mundo.tiempo_actual:
@@ -290,6 +291,7 @@ def generar_candidatos(
                     for vehiculo in mundo.vehiculos.values()
                     if permitir_vehiculos
                     and vehiculo.estado == EstadoVehiculo.DISPONIBLE
+                    and vehiculo.tipo not in tipos_vehiculo_excluidos
                 ),
                 key=lambda vehiculo: vehiculo.id,
             )
