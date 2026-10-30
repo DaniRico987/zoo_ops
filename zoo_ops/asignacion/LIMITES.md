@@ -56,3 +56,24 @@ tiene incidente de origen, ya asignados a otra tarea del mismo incidente. Los
 componentes no consideran preferencias humanas ni una urgencia creciente. Una
 propuesta solo presenta candidatos ordenados y descartes; no confirma ni ejecuta
 asignaciones, que requieren confirmación explícita mediante `asignar_plan`.
+
+## Planificación global
+
+La planificación global usa búsqueda determinista porque cada alternativa es
+un paquete indivisible de cuidadores, vehículo y equipos, no una pareja
+independiente tarea-recurso como en el algoritmo húngaro. La búsqueda maximiza
+lexicográficamente primero la suma de pesos de prioridad de las tareas
+asignadas (BAJA < MEDIA < ALTA < CRITICA) y después la suma de sus puntajes.
+
+Los niveles se procesan en orden EMERGENCIA, RUTINA y MANTENIMIENTO. Los
+recursos comprometidos por niveles anteriores no se preemptan, y las tareas en
+curso tampoco se interrumpen. Dentro de cada nivel, las propuestas se calculan
+una vez por tarea contra el estado previo al nivel; luego se selecciona el
+conjunto sin conflictos y se compromete únicamente en copias del mundo y de las
+reservas.
+
+`max_nodos` limita la búsqueda exacta por nivel. Si se supera, ese nivel usa el
+baseline voraz, que recorre prioridad descendente, menor número de candidatos
+primero e ID, y toma el primer candidato compatible. `nodos_explorados` suma
+los nodos examinados en todos los niveles. `max_candidatos_por_tarea` limita el
+ranking considerado por la búsqueda.

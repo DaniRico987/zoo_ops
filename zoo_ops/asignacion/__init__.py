@@ -14,6 +14,10 @@ from .puntaje import (
     Perfil, Pesos, Puntuado, explicar, perfil_de_tarea, puntuar_candidatos,
 )
 from .propuesta import Propuesta, proponer_planes
+from .planificacion import (
+    Asignacion, NoAsignada, ResultadoGlobal, peso_prioridad, planificar,
+    tareas_listas,
+)
 
 __all__ = [
     "ruta_mas_corta",
@@ -41,4 +45,10 @@ __all__ = [
     "puntuar_candidatos",
     "Propuesta",
     "proponer_planes",
+    "Asignacion",
+    "NoAsignada",
+    "ResultadoGlobal",
+    "peso_prioridad",
+    "planificar",
+    "tareas_listas",
 ]
