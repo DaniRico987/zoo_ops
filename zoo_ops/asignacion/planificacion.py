@@ -48,7 +48,24 @@ class ResultadoGlobal:
     asignaciones: Tuple[Asignacion, ...]
     no_asignadas: Tuple[NoAsignada, ...]
     estrategia_por_nivel: Mapping[Perfil, str]
+    alternativas_por_tarea: Mapping[str, Tuple[Puntuado, ...]]
     nodos_explorados: int
+
+    def __post_init__(self) -> None:
+        """Copia y hace de solo lectura los mapas de salida."""
+        object.__setattr__(
+            self,
+            "estrategia_por_nivel",
+            MappingProxyType(dict(self.estrategia_por_nivel)),
+        )
+        object.__setattr__(
+            self,
+            "alternativas_por_tarea",
+            MappingProxyType({
+                tarea_id: tuple(alternativas)
+                for tarea_id, alternativas in self.alternativas_por_tarea.items()
+            }),
+        )
 
 
 def peso_prioridad(tarea: Tarea) -> int:
@@ -72,7 +89,10 @@ def _perfil_planificador(
     return perfil_de_tarea(tarea, perfiles_por_tipo)
 
 
-def tareas_listas(mundo: Mundo) -> Tuple[Tarea, ...]:
+def tareas_listas(
+    mundo: Mundo,
+    perfiles_por_tipo: Optional[Mapping[str, Perfil]] = None,
+) -> Tuple[Tarea, ...]:
     """Devuelve tareas pendientes con dependencias completas y sin plan."""
     orden_perfil = {
         perfil: indice for indice, perfil in enumerate(_ORDEN_PERFILES)
@@ -91,7 +111,7 @@ def tareas_listas(mundo: Mundo) -> Tuple[Tarea, ...]:
     return tuple(sorted(
         listas,
         key=lambda tarea: (
-            orden_perfil[perfil_de_tarea(tarea)],
+            orden_perfil[perfil_de_tarea(tarea, perfiles_por_tipo)],
             -peso_prioridad(tarea),
             -tarea.urgencia,
             tarea.id,
@@ -262,8 +282,29 @@ def planificar(
     asignaciones = []
     no_asignadas = []
     estrategias = {}
+    alternativas_por_tarea: dict[str, Tuple[Puntuado, ...]] = {}
     nodos_explorados = 0
-    tareas_iniciales = tareas_listas(mundo_trabajo)
+    tareas_iniciales = tareas_listas(
+        mundo_trabajo,
+        perfiles_por_tipo,
+    )
+    ids_listas = {tarea.id for tarea in tareas_iniciales}
+    for tarea in sorted(mundo_trabajo.tareas.values(), key=lambda item: item.id):
+        if tarea.estado != EstadoTarea.PENDIENTE or tarea.id in ids_listas:
+            continue
+        dependencias_pendientes = tuple(sorted(
+            dependencia
+            for dependencia in tarea.dependencias
+            if dependencia not in mundo_trabajo.tareas
+            or mundo_trabajo.tareas[dependencia].estado
+            != EstadoTarea.COMPLETADA
+        ))
+        if dependencias_pendientes:
+            no_asignadas.append(NoAsignada(
+                tarea.id,
+                "dependencias_pendientes",
+                dependencias_pendientes,
+            ))
 
     for perfil_nivel in _ORDEN_PERFILES:
         tareas_nivel = tuple(
@@ -288,6 +329,7 @@ def planificar(
             ranking = propuesta.ranking[:max_candidatos_por_tarea]
             if ranking:
                 rankings[tarea.id] = ranking
+                alternativas_por_tarea[tarea.id] = ranking
             else:
                 no_asignadas.append(NoAsignada(
                     tarea.id,
@@ -341,19 +383,28 @@ def planificar(
                         ("Los candidatos entran en conflicto con planes elegidos",),
                     ))
                 continue
-            asignar_plan(
-                mundo_trabajo,
-                eventos_trabajo,
-                reservas_trabajo,
-                puntuado.candidato.plan,
-                ahora,
-                "planificacion",
-            )
+            try:
+                asignar_plan(
+                    mundo_trabajo,
+                    eventos_trabajo,
+                    reservas_trabajo,
+                    puntuado.candidato.plan,
+                    ahora,
+                    "planificacion",
+                )
+            except ErrorDominio as exc:
+                no_asignadas.append(NoAsignada(
+                    tarea.id,
+                    "conflicto_inesperado",
+                    (str(exc),),
+                ))
+                continue
             asignaciones.append(Asignacion(tarea.id, puntuado))
 
     return ResultadoGlobal(
         asignaciones=tuple(asignaciones),
         no_asignadas=tuple(no_asignadas),
         estrategia_por_nivel=MappingProxyType(estrategias),
+        alternativas_por_tarea=MappingProxyType(alternativas_por_tarea),
         nodos_explorados=nodos_explorados,
     )

@@ -200,3 +200,34 @@ def construir_plan(
         animales_transportados=tuple(animales_transportados),
         ruta=tuple(estimacion.ruta),
     )
+
+
+def reprogramar_plan(
+    mundo: Mundo,
+    plan: PlanEjecucion,
+    ahora: int,
+) -> Optional["Candidato"]:
+    """Recalcula tiempos y ruta de un plan conservando exactamente sus recursos."""
+    tarea = mundo.tareas.get(plan.tarea_id)
+    if tarea is None:
+        return None
+    estimacion = estimar_plan(
+        mundo,
+        tarea,
+        plan.cuidadores,
+        plan.vehiculo_id,
+        ahora,
+    )
+    if estimacion is None:
+        return None
+    plan_reprogramado = construir_plan(
+        estimacion,
+        tarea,
+        plan.cuidadores,
+        plan.vehiculo_id,
+        plan.equipos,
+        plan.animales_transportados,
+    )
+    from zoo_ops.asignacion.candidatos import Candidato
+
+    return Candidato(plan_reprogramado, estimacion)

@@ -177,6 +177,82 @@ def test_tareas_listas_filtra_dependencias_y_ordena_por_perfil_prioridad_y_id():
     )
 
 
+def test_tareas_listas_acepta_perfiles_por_tipo():
+    mundo = _mundo_simple((
+        _tarea("rutina"),
+        _tarea("mantenimiento", tipo="mantenimiento"),
+    ))
+
+    listas = planificacion.tareas_listas(
+        mundo,
+        perfiles_por_tipo={"rutina": Perfil.EMERGENCIA},
+    )
+
+    assert tuple(tarea.id for tarea in listas) == (
+        "rutina",
+        "mantenimiento",
+    )
+
+
+def test_planificar_expone_alternativas_truncadas_por_tarea():
+    mundo = _mundo_simple((_tarea("t1"),))
+
+    resultado = planificacion.planificar(
+        mundo, RegistroReservas(), 0, max_candidatos_por_tarea=2,
+    )
+
+    assert tuple(resultado.alternativas_por_tarea) == ("t1",)
+    assert len(resultado.alternativas_por_tarea["t1"]) == 2
+    with pytest.raises(TypeError):
+        resultado.alternativas_por_tarea["t2"] = ()
+
+
+def test_tareas_pendientes_con_dependencias_incumplidas_se_reportan():
+    mundo = _mundo_simple((
+        _tarea("prereq", prioridad=PrioridadTarea.BAJA),
+        _tarea(
+            "waits",
+            dependencias=frozenset({"prereq", "missing"}),
+        ),
+    ))
+
+    resultado = planificacion.planificar(mundo, RegistroReservas(), 0)
+
+    espera = next(
+        item for item in resultado.no_asignadas
+        if item.tarea_id == "waits"
+    )
+    assert espera.motivo == "dependencias_pendientes"
+    assert espera.detalle == ("missing", "prereq")
+
+
+def test_planificar_registra_conflicto_inesperado_y_continua(monkeypatch):
+    mundo = _mundo_simple((
+        _tarea("a", prioridad=PrioridadTarea.ALTA),
+        _tarea("b", prioridad=PrioridadTarea.MEDIA),
+    ))
+    asignar_original = planificacion.asignar_plan
+
+    def asignar_con_fallo(mundo_local, eventos, reservas, plan, tiempo, causa):
+        if plan.tarea_id == "a":
+            raise ErrorDominio("fallo inyectado")
+        return asignar_original(
+            mundo_local, eventos, reservas, plan, tiempo, causa,
+        )
+
+    monkeypatch.setattr(planificacion, "asignar_plan", asignar_con_fallo)
+
+    resultado = planificacion.planificar(mundo, RegistroReservas(), 0)
+
+    assert tuple(item.tarea_id for item in resultado.asignaciones) == ("b",)
+    assert any(
+        item.tarea_id == "a"
+        and item.motivo == "conflicto_inesperado"
+        and item.detalle == ("fallo inyectado",)
+        for item in resultado.no_asignadas
+    )
+
+
 def test_planes_conflictivos_solo_si_solapan_intervalos_del_mismo_recurso():
     plan_a = PlanEjecucion("a", ("c1",), 0, 5)
     plan_b = PlanEjecucion("b", ("c1",), 5, 10)

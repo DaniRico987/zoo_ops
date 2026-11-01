@@ -76,4 +76,20 @@ reservas.
 baseline voraz, que recorre prioridad descendente, menor número de candidatos
 primero e ID, y toma el primer candidato compatible. `nodos_explorados` suma
 los nodos examinados en todos los niveles. `max_candidatos_por_tarea` limita el
-ranking considerado por la búsqueda.
+ranking considerado por la búsqueda; ese recorte puede ocultar alternativas
+compatibles. Si aparecen tareas con `recursos_comprometidos` que parezcan
+sospechosas, conviene aumentar `max_candidatos_por_tarea`.
+
+## Confirmación y aplicación
+
+El flujo separa proponer de confirmar: `planificar` y `generar_pendientes`
+presentan alternativas, y `aplicar_pendientes` solo aplica una alternativa
+cuando corresponde. La vigencia se mide en tiempo simulado. Antes de aplicar,
+la reprogramación conserva los recursos elegidos y recalcula tiempos y rutas
+según el estado actual; por ello una confirmación puede ser rechazada si el
+mundo cambió desde que se generó.
+
+Las alternativas se validan y reservan al aplicarse, no al seleccionar el
+lote. Por tanto, elegir una alternativa no garantiza que no choque con otra
+confirmación del mismo lote: en ese caso se rechaza solo la asignación
+conflictiva. No hay preempción de tareas en curso.

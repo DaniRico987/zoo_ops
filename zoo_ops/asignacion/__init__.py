@@ -3,7 +3,7 @@
 from .grafo import ruta_mas_corta
 from .tiempos import (
     TIEMPO_PREPARACION_HELICOPTERO, Estimacion, construir_plan,
-    distancia_recta, estimar_plan, segundos_de_viaje,
+    distancia_recta, estimar_plan, reprogramar_plan, segundos_de_viaje,
     tiempo_llegada_cuidador, tiempo_vehiculo_a_destino,
 )
 from .candidatos import (
@@ -18,6 +18,10 @@ from .planificacion import (
     Asignacion, NoAsignada, ResultadoGlobal, peso_prioridad, planificar,
     tareas_listas,
 )
+from .confirmacion import (
+    InformeAplicacion, PropuestaPendiente, ResultadoAplicacion,
+    aplicar_pendientes, generar_pendientes,
+)
 
 __all__ = [
     "ruta_mas_corta",
@@ -26,6 +30,7 @@ __all__ = [
     "construir_plan",
     "distancia_recta",
     "estimar_plan",
+    "reprogramar_plan",
     "segundos_de_viaje",
     "tiempo_llegada_cuidador",
     "tiempo_vehiculo_a_destino",
@@ -51,4 +56,9 @@ __all__ = [
     "peso_prioridad",
     "planificar",
     "tareas_listas",
+    "PropuestaPendiente",
+    "ResultadoAplicacion",
+    "InformeAplicacion",
+    "generar_pendientes",
+    "aplicar_pendientes",
 ]

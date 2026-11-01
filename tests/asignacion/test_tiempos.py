@@ -17,9 +17,10 @@ from zoo_ops.dominio.enums import EstadoEquipo, TipoEquipo
 from zoo_ops.dominio.plan import PlanEjecucion
 from zoo_ops.asignacion.tiempos import (
     TIEMPO_PREPARACION_HELICOPTERO, construir_plan, distancia_recta,
-    estimar_plan, segundos_de_viaje, tiempo_llegada_cuidador,
+    estimar_plan, reprogramar_plan, segundos_de_viaje, tiempo_llegada_cuidador,
     tiempo_vehiculo_a_destino,
 )
+from zoo_ops.asignacion.candidatos import Candidato
 
 
 def _mundo_base():
@@ -270,3 +271,57 @@ def test_estimar_plan_garantiza_intervalo_positivo_si_duracion_es_cero():
 
     assert estimacion is not None
     assert estimacion.hasta > estimacion.desde
+
+
+def test_reprogramar_plan_conserva_recursos_y_recalcula_tiempos():
+    mundo = _mundo_base()
+    mundo.cuidadores["c1"] = Cuidador(
+        "c1", "Uno", velocidad_base=1, ubicacion=("a",),
+    )
+    mundo.vehiculos["v1"] = Vehiculo(
+        "v1", TipoVehiculo.CAMION_TRASLADO, 5, 4, 2,
+        Certificacion.CAMION_TRASLADO, "a",
+    )
+    tarea = Tarea(
+        "t1",
+        "traslado",
+        nodo_destino="b",
+        duracion_estimada=20,
+    )
+    mundo.tareas["t1"] = tarea
+    plan_original = PlanEjecucion(
+        "t1",
+        ("c1",),
+        0,
+        50,
+        vehiculo_id="v1",
+        equipos=("e1",),
+        animales_transportados=("a1",),
+        ruta=("a", "b"),
+    )
+    mundo_antes = copy.deepcopy(mundo)
+
+    candidato = reprogramar_plan(mundo, plan_original, 100)
+
+    assert isinstance(candidato, Candidato)
+    assert candidato.plan.tarea_id == "t1"
+    assert candidato.plan.cuidadores == ("c1",)
+    assert candidato.plan.vehiculo_id == "v1"
+    assert candidato.plan.equipos == ("e1",)
+    assert candidato.plan.animales_transportados == ("a1",)
+    assert candidato.plan.ruta == ("a", "b")
+    assert candidato.plan.desde == 100
+    assert candidato.plan.hasta > plan_original.hasta
+    assert candidato.estimacion.desde == 100
+    assert mundo == mundo_antes
+
+
+def test_reprogramar_plan_devuelve_none_si_un_cuidador_no_puede_llegar():
+    mundo = _mundo_base()
+    mundo.cuidadores["c1"] = Cuidador(
+        "c1", "Uno", ubicacion=("c",),
+    )
+    mundo.tareas["t1"] = Tarea("t1", "tarea", nodo_destino="a")
+    plan = PlanEjecucion("t1", ("c1",), 0, 10)
+
+    assert reprogramar_plan(mundo, plan, 20) is None
