@@ -1,15 +1,17 @@
 """Operaciones compuestas de asignación, desasignación y ciclo de planes."""
 
+from dataclasses import replace
 from typing import Callable, List, Tuple
 
-from zoo_ops.dominio.entidades import Mundo, Tarea
+from zoo_ops.dominio.entidades import Incidente, Mundo, Tarea
 from zoo_ops.dominio.enums import (
-    EstadoCuidador, EstadoTarea, EstadoVehiculo,
+    EstadoCuidador, EstadoIncidente, EstadoTarea, EstadoVehiculo,
+    TipoIncidente,
 )
 from zoo_ops.dominio.errores import ErrorDominio, TiempoRetrocede
 from zoo_ops.dominio.eventos import (
     Evento, RegistroEventos, TipoEvento, aplicar_evento, crear_evento,
-    plan_a_datos_extra,
+    incidente_a_datos_extra, plan_a_datos_extra, tarea_a_datos_extra,
 )
 from zoo_ops.dominio.estados import ejecutar_transicion
 from zoo_ops.dominio.plan import PlanEjecucion, exigir_plan_valido
@@ -17,6 +19,133 @@ from zoo_ops.dominio.reservas import (
     RegistroReservas, liberar_reservas_tarea, paquete_de_reservas,
     reservar_atomico,
 )
+
+
+def abrir_incidente(
+    mundo: Mundo,
+    registro_eventos: RegistroEventos,
+    incidente: Incidente,
+    tareas: List[Tarea],
+    tiempo: int,
+    causa: str,
+) -> List[Evento]:
+    """Crea un incidente y sus tareas en una transacción reconstruible."""
+    if tiempo < mundo.tiempo_actual:
+        raise TiempoRetrocede(mundo.tiempo_actual, tiempo)
+    if not isinstance(incidente, Incidente):
+        raise ErrorDominio("incidente debe ser una instancia de Incidente")
+    if not isinstance(incidente.id, str):
+        raise ErrorDominio("El id del incidente debe ser texto")
+    if incidente.id in mundo.incidentes:
+        raise ErrorDominio(f"El incidente {incidente.id} ya existe en el mundo")
+    if incidente.estado != EstadoIncidente.ABIERTO:
+        raise ErrorDominio("Un incidente nuevo debe estar ABIERTO")
+    if not isinstance(tareas, (list, tuple)):
+        raise ErrorDominio("tareas debe ser una lista o tupla de Tarea")
+    if any(not isinstance(tarea, Tarea) for tarea in tareas):
+        raise ErrorDominio("Cada elemento de tareas debe ser una instancia de Tarea")
+
+    if any(not isinstance(tarea.id, str) for tarea in tareas):
+        raise ErrorDominio("El id de cada tarea debe ser texto")
+    if any(
+        any(not isinstance(dependencia, str) for dependencia in tarea.dependencias)
+        for tarea in tareas
+    ):
+        raise ErrorDominio("Cada id de dependencia debe ser texto")
+    ids_tareas = [tarea.id for tarea in tareas]
+    ids_nuevos = set(ids_tareas)
+    if len(ids_nuevos) != len(ids_tareas):
+        raise ErrorDominio("No se permiten ids de tarea duplicados")
+    if ids_nuevos.intersection(mundo.tareas):
+        duplicados = sorted(ids_nuevos.intersection(mundo.tareas))
+        raise ErrorDominio(f"Ya existen tareas en el mundo: {duplicados}")
+    if any(tarea.estado != EstadoTarea.PENDIENTE for tarea in tareas):
+        raise ErrorDominio("Toda tarea nueva debe estar PENDIENTE")
+    if any(tarea.cuidadores_asignados for tarea in tareas):
+        raise ErrorDominio("Una tarea nueva no puede tener cuidadores asignados")
+    if any(
+        tarea.incidente_origen not in (None, incidente.id)
+        for tarea in tareas
+    ):
+        raise ErrorDominio(
+            "El incidente_origen de cada tarea nueva debe ser el incidente creado"
+        )
+    if incidente.tipo in {
+        TipoIncidente.ESCAPE_TERRESTRE, TipoIncidente.ESCAPE_AEREO,
+    } and incidente.animal_relacionado not in mundo.animales:
+        raise ErrorDominio(
+            "Un incidente de escape requiere un animal_relacionado existente"
+        )
+
+    for tarea in tareas:
+        dependencias_ausentes = set(tarea.dependencias) - set(mundo.tareas) - ids_nuevos
+        if dependencias_ausentes:
+            raise ErrorDominio(
+                f"La tarea {tarea.id} tiene dependencias inexistentes: "
+                f"{sorted(dependencias_ausentes)}"
+            )
+
+    tareas_nuevas = {tarea.id: tarea for tarea in tareas}
+    tareas_por_id = {**mundo.tareas, **tareas_nuevas}
+    visitadas = set()
+    en_visita = set()
+
+    def visitar(tarea_id: str) -> None:
+        if tarea_id in en_visita:
+            raise ErrorDominio("Las dependencias de las tareas nuevas forman un ciclo")
+        if tarea_id in visitadas:
+            return
+        en_visita.add(tarea_id)
+        for dependencia_id in tareas_por_id[tarea_id].dependencias:
+            if dependencia_id in tareas_por_id:
+                visitar(dependencia_id)
+        en_visita.remove(tarea_id)
+        visitadas.add(tarea_id)
+
+    for tarea_id in sorted(tareas_nuevas):
+        visitar(tarea_id)
+
+    incidente_nuevo = replace(
+        incidente, tareas_generadas=frozenset(ids_tareas),
+    )
+    tareas_nuevas_ajustadas = tuple(
+        replace(tarea, incidente_origen=incidente.id)
+        for tarea in tareas
+    )
+    mundo_antes = mundo.instantanea()
+    eventos_antes = registro_eventos.instantanea()
+    eventos = []
+    try:
+        entidades = [
+            ("Incidente", incidente_nuevo.id, "ABIERTO",
+             incidente_a_datos_extra(incidente_nuevo)),
+        ]
+        entidades.extend(
+            ("Tarea", tarea.id, "PENDIENTE", tarea_a_datos_extra(tarea))
+            for tarea in sorted(tareas_nuevas_ajustadas, key=lambda item: item.id)
+        )
+        for entidad_tipo, entidad_id, estado, datos_extra in entidades:
+            evento = crear_evento(
+                registro_eventos,
+                momento=tiempo,
+                tipo=TipoEvento.CREACION_ENTIDAD,
+                entidad_tipo=entidad_tipo,
+                entidad_id=entidad_id,
+                estado_antes="",
+                estado_despues=estado,
+                causa=causa,
+                datos_extra=datos_extra,
+            )
+            registro_eventos.validar_anexo(evento)
+            aplicar_evento(mundo, evento)
+            mundo.tiempo_actual = tiempo
+            registro_eventos.anexar(evento)
+            eventos.append(evento)
+    except Exception:
+        mundo.restaurar(mundo_antes)
+        registro_eventos.restaurar(eventos_antes)
+        raise
+    return eventos
 
 
 def registrar_plan_con_evento(

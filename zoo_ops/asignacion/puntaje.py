@@ -9,7 +9,7 @@ from typing import Mapping, Optional, Tuple
 from zoo_ops.dominio.entidades import Mundo, Tarea, nodo_de_ubicacion
 from zoo_ops.dominio.enums import EstadoTarea
 from zoo_ops.dominio.errores import ErrorDominio
-from zoo_ops.asignacion.candidatos import Candidato
+from zoo_ops.asignacion.tipos import Candidato
 
 
 NIVEL_MAXIMO_HABILIDAD = 5

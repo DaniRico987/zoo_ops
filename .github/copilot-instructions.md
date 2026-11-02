@@ -8,3 +8,4 @@
 - Si algo es ambiguo, no inventes la regla: anótalo como duda al final de la respuesta.
 - No afirmes que las pruebas pasan ni cites líneas o salidas que no hayas obtenido ejecutando realmente el comando. La suite la ejecuta el desarrollador.
 - Responde en español; docstrings en español.
+- Todos los archivos se escriben en UTF-8 sin BOM. No generes archivos redirigiendo la salida de PowerShell (> o Out-File), que escribe UTF-16.

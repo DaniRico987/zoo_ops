@@ -5,6 +5,7 @@ Mundo es un agregado mutable que centraliza las mutaciones de sus colecciones.
 """
 import copy
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from typing import Dict, List, Optional, Set, Tuple, Union, TYPE_CHECKING
 from zoo_ops.dominio.enums import (
     TipoNodo, TipoRecinto, Medio, Peligrosidad, TipoVehiculo, TipoEquipo,
@@ -142,6 +143,27 @@ class HabilidadRequerida:
     nivel_minimo: int
 
 
+class MomentoEfecto(Enum):
+    """Momento del ciclo del animal en el que se aplica un efecto."""
+    AL_INICIAR = auto()
+    AL_COMPLETAR = auto()
+
+
+@dataclass(frozen=True)
+class EfectoAnimal:
+    """Cambio de estado de un animal asociado a una tarea."""
+    animal_id: str
+    estado: EstadoAnimal
+    momento: MomentoEfecto
+    recinto_destino: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.estado == EstadoAnimal.EN_RECINTO and not self.recinto_destino:
+            raise ErrorDominio(
+                f"Efecto para {self.animal_id} exige recinto_destino cuando el estado es EN_RECINTO"
+            )
+
+
 @dataclass(frozen=True)
 class Tarea:
     """Tarea a realizar por un cuidador."""
@@ -160,13 +182,19 @@ class Tarea:
     interrumpible: bool = True
     estado: EstadoTarea = EstadoTarea.PENDIENTE
     incidente_origen: Optional[str] = None  # id del incidente que la generó
+    efectos: Tuple[EfectoAnimal, ...] = field(default_factory=tuple)
     cuidadores_asignados: Tuple[str, ...] = field(default_factory=tuple)
     personas_minimas: int = 1
 
     def __post_init__(self) -> None:
-        """Exige que la tarea requiera al menos una persona."""
+        """Valida la tarea y normaliza el conjunto de efectos."""
         if self.personas_minimas < 1:
             raise ErrorDominio("personas_minimas debe ser al menos 1")
+        if not isinstance(self.efectos, tuple):
+            object.__setattr__(self, "efectos", tuple(self.efectos))
+        for efecto in self.efectos:
+            if not isinstance(efecto, EfectoAnimal):
+                raise ErrorDominio("Cada efecto de tarea debe ser una instancia de EfectoAnimal")
 
 
 # ============================================================================

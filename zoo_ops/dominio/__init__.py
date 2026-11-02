@@ -27,6 +27,7 @@ from .catalogos import (
 from .entidades import (
     Nodo, Arista, Recinto, Cuidador, Vehiculo, IndicadoresSalud, Animal,
     Equipo, Tarea, HabilidadRequerida, Incidente, Sensor, Lectura, Mundo,
+    MomentoEfecto, EfectoAnimal,
     esta_en_nodo, esta_en_arista, obtener_nodo_actual, obtener_arista_actual,
     ubicacion_en_nodo, nodo_de_ubicacion,
 )
@@ -40,6 +41,8 @@ from .eventos import (
     TipoEvento, Evento, RegistroEventos, crear_evento, aplicar_evento,
     reconstruir_estado, verificar_reconstruccion,
     plan_a_datos_extra, plan_desde_datos_extra, EVENTOS_NO_RECONSTRUIBLES,
+    tarea_a_datos_extra, tarea_desde_datos_extra,
+    incidente_a_datos_extra, incidente_desde_datos_extra,
 )
 from .reservas import (
     TipoRecurso, Reserva, RegistroReservas,
@@ -51,7 +54,7 @@ from .plan import (
     validar_ruta_terrestre, validar_plan, exigir_plan_valido,
 )
 from .operaciones import (
-    registrar_plan_con_evento, liberar_plan_con_evento,
+    abrir_incidente, registrar_plan_con_evento, liberar_plan_con_evento,
     asignar_plan, desasignar_plan, iniciar_ejecucion, llegar_a_destino,
     completar_plan, fallar_plan,
 )
@@ -79,6 +82,7 @@ __all__ = [
     # entidades
     "Nodo", "Arista", "Recinto", "Cuidador", "Vehiculo", "IndicadoresSalud", "Animal",
     "Equipo", "Tarea", "HabilidadRequerida", "Incidente", "Sensor", "Lectura", "Mundo",
+    "MomentoEfecto", "EfectoAnimal",
     "esta_en_nodo", "esta_en_arista", "obtener_nodo_actual", "obtener_arista_actual",
     "ubicacion_en_nodo", "nodo_de_ubicacion",
     # estados
@@ -90,13 +94,15 @@ __all__ = [
     "TipoEvento", "Evento", "RegistroEventos", "crear_evento", "aplicar_evento",
     "reconstruir_estado", "verificar_reconstruccion",
     "plan_a_datos_extra", "plan_desde_datos_extra",
+    "tarea_a_datos_extra", "tarea_desde_datos_extra",
+    "incidente_a_datos_extra", "incidente_desde_datos_extra",
     "EVENTOS_NO_RECONSTRUIBLES",
     # reservas
     "TipoRecurso", "Reserva", "RegistroReservas",
     "reservar_atomico", "liberar_reservas_tarea", "verificar_disponibilidad_recurso",
     "paquete_de_reservas", "reservar_plan",
     # plan
-    "PlanEjecucion", "cubre_requisitos_cuidadores",
+    "PlanEjecucion", "cubre_requisitos_cuidadores", "abrir_incidente",
     "validar_capacidad_vehiculo", "validar_ruta_terrestre", "validar_plan",
     "exigir_plan_valido", "registrar_plan_con_evento",
     "liberar_plan_con_evento", "asignar_plan", "desasignar_plan",

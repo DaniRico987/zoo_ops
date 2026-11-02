@@ -23,14 +23,7 @@ from zoo_ops.asignacion.tiempos import (
     Estimacion, construir_plan, estimar_plan, tiempo_llegada_cuidador,
     tiempo_vehiculo_a_destino,
 )
-
-
-@dataclass(frozen=True)
-class Candidato:
-    """Un plan viable junto con su estimación temporal."""
-
-    plan: PlanEjecucion
-    estimacion: Estimacion
+from zoo_ops.asignacion.tipos import Candidato
 
 
 @dataclass(frozen=True)

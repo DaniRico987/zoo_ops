@@ -9,6 +9,7 @@ from zoo_ops.dominio.enums import MedioPermitido, TipoVehiculo
 from zoo_ops.dominio.errores import ErrorDominio
 from zoo_ops.dominio.plan import PlanEjecucion
 from zoo_ops.asignacion.grafo import ruta_mas_corta
+from zoo_ops.asignacion.tipos import Candidato
 
 
 TIEMPO_PREPARACION_HELICOPTERO = 120
@@ -206,7 +207,7 @@ def reprogramar_plan(
     mundo: Mundo,
     plan: PlanEjecucion,
     ahora: int,
-) -> Optional["Candidato"]:
+) -> Optional[Candidato]:
     """Recalcula tiempos y ruta de un plan conservando exactamente sus recursos."""
     tarea = mundo.tareas.get(plan.tarea_id)
     if tarea is None:
@@ -228,6 +229,4 @@ def reprogramar_plan(
         plan.equipos,
         plan.animales_transportados,
     )
-    from zoo_ops.asignacion.candidatos import Candidato
-
     return Candidato(plan_reprogramado, estimacion)

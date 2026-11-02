@@ -11,9 +11,14 @@ from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Any
 from enum import Enum, auto
 from zoo_ops.dominio.enums import (
-    EstadoCuidador, EstadoAnimal, EstadoVehiculo, EstadoTarea, EstadoIncidente
+    Certificacion, EstadoCuidador, EstadoAnimal, EstadoVehiculo, EstadoTarea,
+    EstadoIncidente, Habilidad, PrioridadTarea, TipoEquipo, TipoIncidente,
+    TipoVehiculo,
 )
-from zoo_ops.dominio.entidades import Lectura, Mundo
+from zoo_ops.dominio.entidades import (
+    EfectoAnimal, HabilidadRequerida, Incidente, Lectura, MomentoEfecto,
+    Mundo, Tarea,
+)
 from zoo_ops.dominio.errores import ErrorDominio, EventoDuplicado, EventoNoSoportado
 
 
@@ -78,6 +83,263 @@ def crear_evento(
         causa=causa,
         datos_extra=datos_extra or {}
     )
+
+
+def _enum_a_nombre(enum_value: Any) -> str:
+    """Serializa un enum por nombre, o deja los valores básicos intactos."""
+    return enum_value.name if hasattr(enum_value, "name") else enum_value
+
+
+def efecto_animal_a_datos_extra(efecto: EfectoAnimal) -> Dict[str, Any]:
+    """Serializa un efecto de animal en un formato estable para eventos."""
+    return {
+        "animal_id": efecto.animal_id,
+        "estado": efecto.estado.name,
+        "momento": efecto.momento.name,
+        "recinto_destino": efecto.recinto_destino,
+    }
+
+
+def efecto_animal_desde_datos_extra(datos: Dict[str, Any]) -> EfectoAnimal:
+    """Reconstruye un efecto de animal desde datos_extra."""
+    if not isinstance(datos, dict):
+        raise ErrorDominio("datos_extra del efecto de animal debe ser un diccionario")
+    for campo in ("animal_id", "estado", "momento"):
+        if campo not in datos:
+            raise ErrorDominio(f"datos_extra del efecto carece de campo {campo!r}")
+    estado = _enum_desde_nombre(EstadoAnimal, datos["estado"], "estado de efecto")
+    momento = _enum_desde_nombre(MomentoEfecto, datos["momento"], "momento de efecto")
+    if not isinstance(datos["animal_id"], str):
+        raise ErrorDominio("animal_id del efecto debe ser texto")
+    recinto_destino = datos.get("recinto_destino")
+    if recinto_destino is not None and not isinstance(recinto_destino, str):
+        raise ErrorDominio("recinto_destino del efecto debe ser texto o None")
+    if estado == EstadoAnimal.EN_RECINTO and not recinto_destino:
+        raise ErrorDominio(
+            "Un efecto a EN_RECINTO requiere recinto_destino en datos_extra"
+        )
+    return EfectoAnimal(
+        animal_id=datos["animal_id"],
+        estado=estado,
+        momento=momento,
+        recinto_destino=recinto_destino,
+    )
+
+
+def _enum_desde_nombre(enum_tipo, valor, campo):
+    """Convierte un nombre de enum y traduce datos inválidos a ErrorDominio."""
+    if not isinstance(valor, str):
+        raise ErrorDominio(f"{campo} debe ser el nombre de un enum")
+    try:
+        return enum_tipo[valor]
+    except KeyError as exc:
+        raise ErrorDominio(f"{campo} inválido: {valor!r}") from exc
+
+
+def _secuencia_datos(valor, campo):
+    """Valida las colecciones serializadas y las normaliza a tupla."""
+    if not isinstance(valor, (list, tuple)):
+        raise ErrorDominio(f"datos_extra[{campo!r}] debe ser una lista o tupla")
+    return tuple(valor)
+
+
+def _exigir_tipo(valor, tipo, campo):
+    """Valida un campo escalar evitando coerciones implícitas."""
+    if type(valor) is not tipo:
+        raise ErrorDominio(f"datos_extra[{campo!r}] debe ser {tipo.__name__}")
+
+
+def tarea_a_datos_extra(tarea: Tarea) -> Dict[str, Any]:
+    """Serializa una tarea para almacenamiento o reconstrucción del mundo."""
+    return {
+        "id": tarea.id,
+        "tipo": tarea.tipo,
+        "prioridad_base": tarea.prioridad_base.name,
+        "urgencia": tarea.urgencia,
+        "nodo_destino": tarea.nodo_destino,
+        "duracion_estimada": tarea.duracion_estimada,
+        "habilidades_requeridas": [
+            {
+                "habilidad": requisito.habilidad.name,
+                "nivel_minimo": requisito.nivel_minimo,
+            }
+            for requisito in tarea.habilidades_requeridas
+        ],
+        "certificaciones_requeridas": tuple(
+            sorted((cert.name for cert in tarea.certificaciones_requeridas))
+        ),
+        "vehiculo_requerido": None if tarea.vehiculo_requerido is None else tarea.vehiculo_requerido.name,
+        "equipos_requeridos": tuple(equipo.name for equipo in tarea.equipos_requeridos),
+        "ventana_tiempo": tarea.ventana_tiempo,
+        "dependencias": tuple(sorted(tarea.dependencias)),
+        "interrumpible": tarea.interrumpible,
+        "estado": tarea.estado.name,
+        "incidente_origen": tarea.incidente_origen,
+        "efectos": tuple(efecto_animal_a_datos_extra(efecto) for efecto in tarea.efectos),
+        "cuidadores_asignados": tuple(tarea.cuidadores_asignados),
+        "personas_minimas": tarea.personas_minimas,
+    }
+
+
+def tarea_desde_datos_extra(datos: Dict[str, Any]) -> Tarea:
+    """Reconstruye una tarea validando tipos y campos serializados."""
+    if not isinstance(datos, dict):
+        raise ErrorDominio("datos_extra de la tarea debe ser un diccionario")
+    obligatorios = (
+        "id", "tipo", "prioridad_base", "urgencia", "nodo_destino",
+        "duracion_estimada", "habilidades_requeridas",
+        "certificaciones_requeridas", "equipos_requeridos", "dependencias",
+        "interrumpible", "estado", "cuidadores_asignados", "personas_minimas",
+    )
+    faltantes = [campo for campo in obligatorios if campo not in datos]
+    if faltantes:
+        raise ErrorDominio(f"datos_extra de la tarea carece de campos: {', '.join(faltantes)}")
+
+    for campo in ("id", "tipo", "nodo_destino"):
+        if not isinstance(datos[campo], str):
+            raise ErrorDominio(f"datos_extra[{campo!r}] debe ser texto")
+    for campo in ("urgencia", "duracion_estimada", "personas_minimas"):
+        _exigir_tipo(datos[campo], int, campo)
+    _exigir_tipo(datos["interrumpible"], bool, "interrumpible")
+
+    try:
+        prioridad = _enum_desde_nombre(
+            PrioridadTarea, datos["prioridad_base"], "prioridad_base",
+        )
+        estado = _enum_desde_nombre(EstadoTarea, datos["estado"], "estado")
+        vehiculo = datos.get("vehiculo_requerido")
+        vehiculo = (
+            None if vehiculo is None else
+            _enum_desde_nombre(TipoVehiculo, vehiculo, "vehiculo_requerido")
+        )
+        habilidades = []
+        for item in _secuencia_datos(
+            datos["habilidades_requeridas"], "habilidades_requeridas",
+        ):
+            if not isinstance(item, dict) or not {
+                "habilidad", "nivel_minimo",
+            }.issubset(item):
+                raise ErrorDominio(
+                    "Cada habilidad requerida debe incluir habilidad y nivel_minimo"
+                )
+            _exigir_tipo(item["nivel_minimo"], int, "nivel_minimo")
+            habilidades.append(HabilidadRequerida(
+                habilidad=_enum_desde_nombre(
+                    Habilidad, item["habilidad"], "habilidad requerida",
+                ),
+                nivel_minimo=item["nivel_minimo"],
+            ))
+
+        certificaciones = tuple(
+            _enum_desde_nombre(Certificacion, nombre, "certificacion requerida")
+            for nombre in _secuencia_datos(
+                datos["certificaciones_requeridas"], "certificaciones_requeridas",
+            )
+        )
+        equipos = tuple(
+            _enum_desde_nombre(TipoEquipo, nombre, "equipo requerido")
+            for nombre in _secuencia_datos(
+                datos["equipos_requeridos"], "equipos_requeridos",
+            )
+        )
+        dependencias = _secuencia_datos(datos["dependencias"], "dependencias")
+        cuidadores = _secuencia_datos(
+            datos["cuidadores_asignados"], "cuidadores_asignados",
+        )
+        for campo, valores in (
+            ("dependencias", dependencias),
+            ("cuidadores_asignados", cuidadores),
+        ):
+            if any(not isinstance(valor, str) for valor in valores):
+                raise ErrorDominio(f"Cada elemento de {campo} debe ser texto")
+
+        efectos = tuple(
+            efecto_animal_desde_datos_extra(efecto)
+            for efecto in _secuencia_datos(datos.get("efectos", ()), "efectos")
+        )
+        ventana = datos.get("ventana_tiempo")
+        if ventana is not None:
+            ventana = _secuencia_datos(ventana, "ventana_tiempo")
+            if len(ventana) != 2 or any(type(valor) is not int for valor in ventana):
+                raise ErrorDominio(
+                    "ventana_tiempo debe contener exactamente dos enteros"
+                )
+            ventana = tuple(ventana)
+        incidente_origen = datos.get("incidente_origen")
+        if incidente_origen is not None and not isinstance(incidente_origen, str):
+            raise ErrorDominio("incidente_origen debe ser texto o None")
+
+        return Tarea(
+            id=datos["id"],
+            tipo=datos["tipo"],
+            prioridad_base=prioridad,
+            urgencia=datos["urgencia"],
+            nodo_destino=datos["nodo_destino"],
+            duracion_estimada=datos["duracion_estimada"],
+            habilidades_requeridas=tuple(habilidades),
+            certificaciones_requeridas=frozenset(certificaciones),
+            vehiculo_requerido=vehiculo,
+            equipos_requeridos=equipos,
+            ventana_tiempo=ventana,
+            dependencias=frozenset(dependencias),
+            interrumpible=datos["interrumpible"],
+            estado=estado,
+            incidente_origen=incidente_origen,
+            efectos=efectos,
+            cuidadores_asignados=cuidadores,
+            personas_minimas=datos["personas_minimas"],
+        )
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise ErrorDominio(f"datos_extra no permiten reconstruir la tarea: {exc}") from exc
+
+
+def incidente_a_datos_extra(incidente: Incidente) -> Dict[str, Any]:
+    """Serializa un incidente con enums por nombre y tareas ordenadas."""
+    return {
+        "id": incidente.id,
+        "tipo": incidente.tipo.name,
+        "severidad": incidente.severidad,
+        "ubicacion": incidente.ubicacion,
+        "estado": incidente.estado.name,
+        "tareas_generadas": tuple(sorted(incidente.tareas_generadas)),
+        "animal_relacionado": incidente.animal_relacionado,
+    }
+
+
+def incidente_desde_datos_extra(datos: Dict[str, Any]) -> Incidente:
+    """Reconstruye un incidente y valida todos sus datos."""
+    if not isinstance(datos, dict):
+        raise ErrorDominio("datos_extra del incidente debe ser un diccionario")
+    obligatorios = ("id", "tipo", "severidad", "ubicacion", "estado", "tareas_generadas")
+    faltantes = [campo for campo in obligatorios if campo not in datos]
+    if faltantes:
+        raise ErrorDominio(
+            "datos_extra del incidente carece de campos: " + ", ".join(faltantes)
+        )
+    for campo in ("id", "ubicacion"):
+        if not isinstance(datos[campo], str):
+            raise ErrorDominio(f"datos_extra[{campo!r}] debe ser texto")
+    _exigir_tipo(datos["severidad"], int, "severidad")
+    tareas = _secuencia_datos(datos["tareas_generadas"], "tareas_generadas")
+    if any(not isinstance(tarea_id, str) for tarea_id in tareas):
+        raise ErrorDominio("Cada id de tareas_generadas debe ser texto")
+    animal_id = datos.get("animal_relacionado")
+    if animal_id is not None and not isinstance(animal_id, str):
+        raise ErrorDominio("animal_relacionado debe ser texto o None")
+    try:
+        return Incidente(
+            id=datos["id"],
+            tipo=_enum_desde_nombre(TipoIncidente, datos["tipo"], "tipo"),
+            severidad=datos["severidad"],
+            ubicacion=datos["ubicacion"],
+            estado=_enum_desde_nombre(EstadoIncidente, datos["estado"], "estado"),
+            tareas_generadas=frozenset(tareas),
+            animal_relacionado=animal_id,
+        )
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise ErrorDominio(
+            f"datos_extra no permiten reconstruir el incidente: {exc}"
+        ) from exc
 
 
 def plan_a_datos_extra(plan: "PlanEjecucion") -> Dict[str, Any]:
@@ -313,7 +575,39 @@ def _aplicar_cambio_estado(mundo: Mundo, evento: Evento) -> Mundo:
 
 
 def _aplicar_creacion(mundo: Mundo, evento: Evento) -> Mundo:
-    """Aplica CREACION_ENTIDAD (no-op explícito: las entidades ya están en el mundo)."""
+    """Crea tareas e incidentes iniciales; otros tipos siguen siendo no-op."""
+    configuracion = {
+        "Tarea": ("tareas", tarea_desde_datos_extra, "PENDIENTE"),
+        "Incidente": ("incidentes", incidente_desde_datos_extra, "ABIERTO"),
+    }.get(evento.entidad_tipo)
+    if configuracion is None:
+        return mundo
+
+    coleccion, deserializar, estado_inicial = configuracion
+    if evento.estado_despues != estado_inicial:
+        raise ErrorDominio(
+            f"CREACION_ENTIDAD de {evento.entidad_tipo} debe iniciar en "
+            f"{estado_inicial}"
+        )
+    if evento.entidad_id in getattr(mundo, coleccion):
+        raise ErrorDominio(
+            f"Ya existe {evento.entidad_tipo}:{evento.entidad_id} en el mundo"
+        )
+    entidad = deserializar(evento.datos_extra)
+    if entidad.id != evento.entidad_id:
+        raise ErrorDominio(
+            f"El id serializado {entidad.id} no coincide con "
+            f"el id del evento {evento.entidad_id}"
+        )
+    if evento.entidad_tipo == "Tarea":
+        if entidad.estado.name != estado_inicial:
+            raise ErrorDominio("Una tarea creada debe estar PENDIENTE")
+        if entidad.cuidadores_asignados:
+            raise ErrorDominio("Una tarea creada no puede tener cuidadores asignados")
+    elif entidad.estado.name != estado_inicial:
+        raise ErrorDominio("Un incidente creado debe estar ABIERTO")
+
+    mundo.agregar_entidad(coleccion, evento.entidad_id, entidad)
     return mundo
 
 

@@ -21,6 +21,11 @@ from zoo_ops.asignacion.tiempos import (
     tiempo_vehiculo_a_destino,
 )
 from zoo_ops.asignacion.candidatos import Candidato
+from zoo_ops.asignacion.tipos import Candidato as CandidatoCompartido
+
+
+def test_candidato_vive_en_tipos_y_candidatos_lo_reexporta():
+    assert Candidato is CandidatoCompartido
 
 
 def _mundo_base():
