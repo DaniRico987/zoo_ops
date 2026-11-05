@@ -92,7 +92,9 @@
 
 `asignar_plan` cambia a `ASIGNADO` a los cuidadores y a `RESERVADO` al vehículo, si existe. `iniciar_ejecucion` mueve la tarea a `EN_CURSO`, a los cuidadores a `EN_CAMINO` y al vehículo a `EN_RUTA`. `llegar_a_destino` mueve cuidadores y vehículo a sus estados de ejecución y actualiza sus ubicaciones al nodo destino; la tarea permanece `EN_CURSO`. `completar_plan` y `fallar_plan` liberan recursos y reservas, pero conservan el plan como historial. Los equipos no cambian de estado: siguen `DISPONIBLE` y solo se reservan por intervalo.
 
-Los efectos de animales todavía no se aplican al iniciar o completar una tarea. No se modelan pausa ni aborto en tránsito. Las ubicaciones de cuidadores y vehículos solo cambian a la llegada dentro de estas operaciones. El reloj de todos los eventos de una operación compuesta es el mismo y no puede retroceder.
+Los efectos `AL_INICIAR` y `AL_COMPLETAR` se aplican dentro de la transacción de inicio o finalización, respectivamente, después de las transiciones de la tarea y sus recursos. Solo cambian el estado del animal y, al pasar a `EN_RECINTO`, su ubicación. Un animal en `EN_TRASLADO` no está vinculado por una invariante a un plan activo. `fallar_plan` no aplica ni revierte efectos; si un efecto de completado no es válido, la finalización se revierte y debe usarse `fallar_plan` para liberar los recursos.
+
+No se modelan pausa ni aborto en tránsito. Las ubicaciones de cuidadores y vehículos solo cambian a la llegada dentro de estas operaciones. El reloj de todos los eventos de una operación compuesta es el mismo y no puede retroceder.
 
 La transición `ASIGNADO -> DISPONIBLE` de cuidador está permitida para revertir una asignación antes de salir hacia la tarea.
 

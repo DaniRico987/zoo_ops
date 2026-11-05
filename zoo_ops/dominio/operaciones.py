@@ -3,17 +3,24 @@
 from dataclasses import replace
 from typing import Callable, List, Tuple
 
-from zoo_ops.dominio.entidades import Incidente, Mundo, Tarea
-from zoo_ops.dominio.enums import (
-    EstadoCuidador, EstadoIncidente, EstadoTarea, EstadoVehiculo,
-    TipoIncidente,
+from zoo_ops.dominio.entidades import (
+    EfectoAnimal, Incidente, MomentoEfecto, Mundo, Tarea,
 )
-from zoo_ops.dominio.errores import ErrorDominio, TiempoRetrocede
+from zoo_ops.dominio.enums import (
+    EstadoAnimal, EstadoCuidador, EstadoIncidente, EstadoTarea,
+    EstadoVehiculo, TipoIncidente,
+)
+from zoo_ops.dominio.errores import (
+    ErrorDominio, TiempoRetrocede, TransicionInvalida,
+)
 from zoo_ops.dominio.eventos import (
     Evento, RegistroEventos, TipoEvento, aplicar_evento, crear_evento,
     incidente_a_datos_extra, plan_a_datos_extra, tarea_a_datos_extra,
 )
-from zoo_ops.dominio.estados import ejecutar_transicion
+from zoo_ops.dominio.estados import (
+    TRANSICIONES_ANIMAL, ejecutar_transicion,
+    validar_transicion_animal_extra,
+)
 from zoo_ops.dominio.plan import PlanEjecucion, exigir_plan_valido
 from zoo_ops.dominio.reservas import (
     RegistroReservas, liberar_reservas_tarea, paquete_de_reservas,
@@ -378,6 +385,91 @@ def _exigir_estado_recursos(
             )
 
 
+def _efectos_en_momento(
+    tarea: Tarea,
+    momento: MomentoEfecto,
+) -> Tuple[EfectoAnimal, ...]:
+    """Obtiene los efectos del momento conservando su orden declarado."""
+    return tuple(
+        efecto for efecto in tarea.efectos
+        if efecto.momento == momento
+    )
+
+
+def _validar_efectos_animales(
+    mundo: Mundo,
+    tarea: Tarea,
+    momento: MomentoEfecto,
+) -> Tuple[EfectoAnimal, ...]:
+    """Valida de antemano una secuencia de efectos sin mutar ni consumir IDs."""
+    efectos = _efectos_en_momento(tarea, momento)
+    estados_simulados: dict[str, EstadoAnimal] = {}
+    for efecto in efectos:
+        animal = mundo.animales.get(efecto.animal_id)
+        if animal is None:
+            raise ErrorDominio(
+                f"El animal {efecto.animal_id} del efecto de la tarea "
+                f"{tarea.id} no existe en el mundo"
+            )
+        if not isinstance(efecto.estado, EstadoAnimal):
+            raise ErrorDominio(
+                f"El efecto de la tarea {tarea.id} tiene un estado animal inválido"
+            )
+
+        estado_actual = estados_simulados.get(efecto.animal_id, animal.estado)
+        permitidos = TRANSICIONES_ANIMAL.get(estado_actual, frozenset())
+        if efecto.estado not in permitidos:
+            raise TransicionInvalida(
+                entidad=f"Animal:{efecto.animal_id}",
+                estado_actual=estado_actual.name,
+                estado_intentado=efecto.estado.name,
+                mensaje="transición del efecto no permitida",
+            )
+
+        error_extra = validar_transicion_animal_extra(
+            animal,
+            estado_actual,
+            efecto.estado,
+            mundo,
+            efecto.recinto_destino,
+        )
+        if error_extra:
+            raise TransicionInvalida(
+                entidad=f"Animal:{efecto.animal_id}",
+                estado_actual=estado_actual.name,
+                estado_intentado=efecto.estado.name,
+                mensaje=error_extra,
+            )
+        estados_simulados[efecto.animal_id] = efecto.estado
+    return efectos
+
+
+def _aplicar_efectos_animales(
+    mundo: Mundo,
+    registro_eventos: RegistroEventos,
+    efectos: Tuple[EfectoAnimal, ...],
+    tiempo: int,
+    causa: str,
+) -> List[Evento]:
+    """Aplica secuencialmente efectos ya validados mediante eventos de dominio."""
+    eventos = []
+    for efecto in efectos:
+        parametros = {}
+        if efecto.recinto_destino is not None:
+            parametros["recinto_destino"] = efecto.recinto_destino
+        eventos.append(ejecutar_transicion(
+            mundo,
+            registro_eventos,
+            "Animal",
+            efecto.animal_id,
+            efecto.estado,
+            tiempo,
+            causa,
+            **parametros,
+        ))
+    return eventos
+
+
 def _exigir_reloj_monotono(mundo: Mundo, tiempo: int) -> None:
     if tiempo < mundo.tiempo_actual:
         raise TiempoRetrocede(mundo.tiempo_actual, tiempo)
@@ -421,6 +513,9 @@ def iniciar_ejecucion(
     _exigir_estado_recursos(
         mundo, plan, EstadoCuidador.ASIGNADO, EstadoVehiculo.RESERVADO,
     )
+    efectos_animales = _validar_efectos_animales(
+        mundo, tarea, MomentoEfecto.AL_INICIAR,
+    )
 
     def iniciar() -> List[Evento]:
         eventos = [ejecutar_transicion(
@@ -437,6 +532,9 @@ def iniciar_ejecucion(
                 mundo, registro_eventos, "Vehiculo", plan.vehiculo_id,
                 EstadoVehiculo.EN_RUTA, tiempo, causa,
             ))
+        eventos.extend(_aplicar_efectos_animales(
+            mundo, registro_eventos, efectos_animales, tiempo, causa,
+        ))
         return eventos
 
     return _ejecutar_con_reversion(
@@ -498,6 +596,11 @@ def _finalizar_ejecucion(
     _exigir_estado_recursos(
         mundo, plan, EstadoCuidador.EJECUTANDO, EstadoVehiculo.EN_USO,
     )
+    efectos_animales = (
+        _validar_efectos_animales(mundo, tarea, MomentoEfecto.AL_COMPLETAR)
+        if estado_final == EstadoTarea.COMPLETADA
+        else ()
+    )
 
     def finalizar() -> List[Evento]:
         eventos = [ejecutar_transicion(
@@ -515,6 +618,9 @@ def _finalizar_ejecucion(
                 EstadoVehiculo.DISPONIBLE, tiempo, causa,
             ))
         liberar_reservas_tarea(registro_reservas, tarea_id)
+        eventos.extend(_aplicar_efectos_animales(
+            mundo, registro_eventos, efectos_animales, tiempo, causa,
+        ))
         return eventos
 
     return _ejecutar_con_reversion(
