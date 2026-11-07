@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Mapping, Optional, Tuple
 
 from zoo_ops.dominio.entidades import Mundo
-from zoo_ops.dominio.enums import TipoVehiculo
+from zoo_ops.dominio.enums import EstadoAnimal, TipoVehiculo
 from zoo_ops.dominio.errores import ErrorDominio
 from zoo_ops.dominio.reservas import RegistroReservas
 from zoo_ops.asignacion.candidatos import Descartado, generar_candidatos
@@ -42,6 +42,14 @@ def proponer_planes(
     tarea = mundo.tareas.get(tarea_id)
     if tarea is None:
         raise ErrorDominio(f"La tarea {tarea_id} no existe en el mundo")
+    animales = tuple(sorted(
+        set(animales_transportados)
+        | {
+            efecto.animal_id
+            for efecto in tarea.efectos
+            if efecto.estado == EstadoAnimal.EN_TRASLADO
+        }
+    ))
     perfil_elegido = (
         perfil
         if perfil is not None
@@ -61,7 +69,7 @@ def proponer_planes(
         registro_reservas,
         tarea_id,
         ahora,
-        animales_transportados,
+        animales,
         permitir_vehiculos,
         max_combinaciones,
         tipos_excluidos,

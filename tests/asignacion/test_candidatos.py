@@ -301,19 +301,10 @@ def test_descartes_de_reserva_se_agrupan_independientemente_de_combinaciones():
 
 def test_descartes_de_plan_invalido_se_agrupan_por_vehiculo():
     mundo = _mundo()
-    mundo.animales["j1"] = Animal(
-        "j1", ESPECIES_CATALOGO["jaguar"], "recinto", "recinto",
-    )
-    mundo.animales["j2"] = Animal(
-        "j2", ESPECIES_CATALOGO["jaguar"], "recinto", "recinto",
-    )
-    mundo.animales["j3"] = Animal(
-        "j3", ESPECIES_CATALOGO["jaguar"], "recinto", "recinto",
-    )
 
     resultado = generar_candidatos(
         mundo, RegistroReservas(), "t1", 0,
-        animales_transportados=("j1", "j2", "j3"),
+        animales_transportados=("inexistente-1", "inexistente-2"),
     )
 
     descartes = [
@@ -328,6 +319,19 @@ def test_descartes_de_plan_invalido_se_agrupan_por_vehiculo():
     )
     assert ocurrencias >= 5
     assert sum(detalle.startswith("ejemplo:") for detalle in descartes[0].detalle) <= 3
+
+
+def test_animales_por_encima_de_capacidad_se_descartan_antes_de_validar_plan():
+    mundo = _mundo()
+
+    resultado = generar_candidatos(
+        mundo, RegistroReservas(), "t1", 0,
+        animales_transportados=("j1", "j2", "j3"),
+    )
+
+    motivos = {descartado.motivo for descartado in resultado.descartados}
+    assert "capacidad" in motivos
+    assert "plan_invalido" not in motivos
 
 
 def test_cuidadores_con_tarea_activa_no_son_elegibles():

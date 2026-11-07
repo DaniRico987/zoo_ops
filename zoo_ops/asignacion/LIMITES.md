@@ -17,6 +17,12 @@ Las ubicaciones de cuidadores sobre una arista no se estiman y producen `None`;
 solo se admiten ubicaciones representadas por un nodo. Estas funciones calculan
 rutas y tiempos sin mutar el mundo.
 
+Para propuestas de tareas con efectos animales, `animal_id` de los efectos
+`EN_TRASLADO` se combina con los animales explícitos de `proponer_planes`, sin
+duplicados y en orden determinista; `planificar` deriva la lista desde la tarea.
+El vehículo debe estar ya en el punto donde se recoge al animal. No se modelan
+recorridos hasta el animal ni puntos de paso en las rutas.
+
 La generación de candidatos solo considera recursos en estado `DISPONIBLE` en
 el momento de estimar. Los cuidadores no cambian de ubicación durante la espera
 de recogida; se supone que el equipo y los equipos de equipamiento viajan con el
@@ -93,3 +99,7 @@ Las alternativas se validan y reservan al aplicarse, no al seleccionar el
 lote. Por tanto, elegir una alternativa no garantiza que no choque con otra
 confirmación del mismo lote: en ese caso se rechaza solo la asignación
 conflictiva. No hay preempción de tareas en curso.
+
+Si una tarea de un incidente falla, el incidente no puede cerrarse mientras
+esa tarea siga en estado `FALLIDA`; la política de reintento aún no está
+definida.

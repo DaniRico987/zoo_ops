@@ -331,6 +331,18 @@ def generar_candidatos(
                 f"Admite {vehiculo.capacidad_personas} personas; se requieren {cantidad}",
             )
             continue
+        if (
+            vehiculo is not None
+            and len(animales_transportados) > vehiculo.capacidad_animales
+        ):
+            _acumular_descartado(
+                descartes_acumulados,
+                "capacidad",
+                vehiculo_id,
+                f"Admite {vehiculo.capacidad_animales} animales; "
+                f"se requieren {len(animales_transportados)}",
+            )
+            continue
 
         tiempos = {}
         ubicacion_objetivo = (
